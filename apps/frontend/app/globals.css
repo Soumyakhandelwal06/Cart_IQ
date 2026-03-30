@@ -85,8 +85,8 @@
 
 /* Glowing border animation for the winner card */
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.4), 0 0 40px rgba(16, 185, 129, 0.2); }
-  50% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.7), 0 0 60px rgba(16, 185, 129, 0.4); }
+  0%, 100% { box-shadow: 0 0 15px rgba(52, 211, 153, 0.25), 0 0 30px rgba(52, 211, 153, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(52, 211, 153, 0.45), 0 0 50px rgba(52, 211, 153, 0.2); }
 }
 
 .winner-glow {
@@ -100,7 +100,7 @@
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%);
+  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
   background-size: 1000px 100%;
   animation: shimmer 1.8s infinite linear;
 }
@@ -114,7 +114,7 @@
 .cursor-blink::after {
   content: '|';
   animation: cursor-blink 1s step-end infinite;
-  color: #8b5cf6;
+  color: #7c3aed;
   margin-left: 2px;
 }
 
@@ -130,7 +130,7 @@
 
 /* Search input glow */
 .search-glow:focus-within {
-  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.5), 0 0 30px rgba(139, 92, 246, 0.2);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.5), 0 10px 25px rgba(139, 92, 246, 0.15);
 }
 
 /* Platform card hover */
@@ -241,4 +241,3 @@
 [data-theme="light"] ::-webkit-scrollbar-track { background: #f3f4f6; }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: #d1d5db; }
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
-
