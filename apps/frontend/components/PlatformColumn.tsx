@@ -43,85 +43,78 @@ export default function PlatformColumn({
 
   return (
     <div
-      className={`platform-card rounded-2xl border overflow-hidden animate-slide-up transition-all duration-300 ${isWinner
-        ? "border-emerald-500/60 winner-glow bg-gray-900/90 scale-[1.02] shadow-2xl shadow-emerald-500/20"
-        : "border-gray-700/50 bg-gray-900/60"
+      className={`platform-card rounded-3xl overflow-hidden animate-slide-up transition-all duration-300 ${isWinner
+        ? "border-2 border-emerald-400 winner-glow bg-white scale-[1.03] shadow-2xl shadow-emerald-500/20 z-10"
+        : "border border-slate-200 bg-white shadow-xl shadow-slate-200/50"
         }`}
       style={{ animationDelay: `${animationDelay}s` }}
     >
       {/* Platform Header */}
       <div
-        className={`px-5 py-4 flex items-center justify-between border-b ${isWinner ? "border-emerald-500/20 bg-emerald-950/30" : "border-gray-700/30"
+        className={`px-6 py-5 flex items-center justify-between border-b ${isWinner ? "border-emerald-100 bg-emerald-50/50" : "border-slate-100 bg-slate-50/50"
           }`}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xl">{PLATFORM_ICONS[platform.platform] || "🛒"}</span>
-          <span className="font-bold text-white text-lg" style={{ fontFamily: "var(--font-outfit)" }}>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl drop-shadow-sm">{PLATFORM_ICONS[platform.platform] || "🛒"}</span>
+          <span className="font-extrabold text-slate-800 text-xl tracking-tight" style={{ fontFamily: "var(--font-outfit)" }}>
             {platform.platform_display}
           </span>
         </div>
         <div className="flex items-center gap-2">
           {isWinner && (
-            <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 rounded-full px-2 py-0.5 animate-pulse">
-              ✓ BEST PRICE
+            <span className="text-[10px] font-black tracking-widest text-emerald-600 bg-emerald-100 border border-emerald-200 rounded-full px-3 py-1 shadow-sm">
+              BEST PRICE
             </span>
           )}
-          <span className="text-xs text-gray-500">~{platform.estimated_delivery_min} min</span>
+          <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">~{platform.estimated_delivery_min}m</span>
         </div>
       </div>
 
       {/* Item List */}
-      <div className="px-5 py-3 space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar">
+      <div className="px-6 py-4 space-y-2 max-h-[350px] overflow-y-auto custom-scrollbar">
         {platform.items.map((item) => (
-          <div key={item.item_name} className="flex items-center justify-between gap-3 py-3 border-b border-gray-800/40 last:border-0 hover:bg-white/5 transition-colors rounded-lg px-2 -mx-2">
+          <div key={item.item_name} className="flex items-center justify-between gap-4 py-3 border-b border-slate-100/80 last:border-0 hover:bg-slate-50/50 transition-colors rounded-xl px-2 -mx-2">
             {/* Image */}
-            <div className="w-12 h-12 rounded-lg bg-gray-800 flex-shrink-0 overflow-hidden border border-gray-700 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-xl bg-white flex-shrink-0 overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center p-1">
               {item.image_url ? (
                 <img src={item.image_url} alt={item.matched_product_name} className="w-full h-full object-contain" />
               ) : (
-                <span className="text-xl">📦</span>
+                <span className="text-2xl opacity-50">📦</span>
               )}
             </div>
 
             <div className="flex-1 min-w-0">
               <a
                 href={(() => {
-                  // Detect if product_url is a bare homepage (not a deep link / search result)
                   const isUsableUrl = (u?: string) => {
                     if (!u || u === "#") return false;
                     try {
                       const parsed = new URL(u);
-                      // Must have a meaningful path beyond just "/" to be considered deep link
                       return parsed.pathname.length > 1 || parsed.search.length > 0;
                     } catch { return false; }
                   };
-
                   if (isUsableUrl(item.product_url)) return item.product_url!;
-
-                  // Fall back to a targeted product search URL on the platform
                   const q = encodeURIComponent(item.matched_product_name);
-                  if (platform.platform === "blinkit")
-                    return `https://blinkit.com/s/?q=${q}`;
-                  if (platform.platform === "zepto")
-                    return `https://www.zeptonow.com/search?query=${q}`;
+                  if (platform.platform === "blinkit") return `https://blinkit.com/s/?q=${q}`;
+                  if (platform.platform === "zepto") return `https://www.zeptonow.com/search?query=${q}`;
                   return `https://www.bigbasket.com/ps/?q=${q}`;
                 })()}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-gray-300 truncate block hover:text-white transition-colors cursor-pointer font-medium"
+                className="text-sm text-slate-700 truncate block hover:text-violet-600 transition-colors cursor-pointer font-bold leading-tight"
               >
                 {item.matched_product_name}
               </a>
-              <p className="text-xs text-gray-600 mt-0.5">
-                {item.quantity} unit{item.quantity > 1 ? "s" : ""} · {item.available ? `₹${item.unit_price}/unit` : ""}
+              <p className="text-[13px] text-slate-500 mt-1 font-medium">
+                {item.quantity} unit{item.quantity > 1 ? "s" : ""} · {item.available ? `₹${item.unit_price}` : ""}
               </p>
             </div>
 
             <div className="text-right flex-shrink-0">
               {item.available ? (
-                <p className="text-sm font-bold text-white">₹{item.subtotal.toFixed(0)}</p>
+                <p className="text-[15px] font-black text-slate-800 bg-slate-100 px-2 py-1 rounded-lg">₹{item.subtotal.toFixed(0)}</p>
               ) : (
-                <span className="text-xs text-red-400 bg-red-950/40 border border-red-800/30 rounded px-2 py-0.5">
+                <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1 shadow-sm">
                   N/A
                 </span>
               )}
@@ -131,22 +124,22 @@ export default function PlatformColumn({
       </div>
 
       {/* Fee Breakdown */}
-      <div className="px-5 py-3 bg-gray-950/50 space-y-1.5 border-t border-gray-800/40">
+      <div className="px-6 py-5 bg-slate-50 space-y-2 border-t border-slate-100">
         <FeeRow label="Items Total" value={platform.item_total} />
         <FeeRow label="Delivery" value={platform.delivery_fee} />
         {(platform.handling_fee > 0 || platform.surge_fee > 0) && (
           <FeeRow label="Other Fees" value={platform.handling_fee + platform.surge_fee} warn={platform.surge_fee > 0} />
         )}
-        <div className="border-t border-gray-700/40 pt-2 mt-1 flex items-center justify-between">
-          <span className="font-bold text-gray-400 text-sm">TOTAL</span>
-          <span className={`font-bold text-xl ${isWinner ? "text-emerald-400" : "text-white"}`}>
+        <div className="border-t border-slate-200 pt-3 mt-2 flex items-center justify-between">
+          <span className="font-extrabold tracking-wider text-slate-400 text-xs">TOTAL</span>
+          <span className={`font-black text-2xl ${isWinner ? "text-emerald-600" : "text-slate-800"}`}>
             ₹{platform.total_payable.toFixed(0)}
           </span>
         </div>
       </div>
 
       {/* Checkout Button */}
-      <div className="px-5 py-4">
+      <div className="px-6 py-5">
         <button
           onClick={handleCheckout}
           id={`checkout-${platform.platform}`}
@@ -169,8 +162,8 @@ export default function PlatformColumn({
 function FeeRow({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
     <div className="flex items-center justify-between">
-      <span className={`text-[11px] uppercase tracking-wider ${warn ? "text-orange-400" : "text-gray-500"}`}>{label}</span>
-      <span className={`text-xs font-medium ${warn ? "text-orange-400" : "text-gray-400"}`}>
+      <span className={`text-[11px] font-bold uppercase tracking-wider ${warn ? "text-orange-500" : "text-slate-500"}`}>{label}</span>
+      <span className={`text-[13px] font-bold ${warn ? "text-orange-500" : "text-slate-600"}`}>
         ₹{value.toFixed(0)}
       </span>
     </div>
