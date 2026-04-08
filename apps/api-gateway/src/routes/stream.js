@@ -6,13 +6,14 @@
  */
 const express = require('express');
 const redis = require('../redis');
+const auth = require('../middleware/auth');
 
 const router = express.Router();
 const POLL_INTERVAL_MS = 400;
 const MAX_WAIT_MS = 150000; // 2.5 min — real Playwright scraping takes 30-90s
 
 
-router.get('/:searchId', (req, res) => {
+router.get('/:searchId', auth, (req, res) => {
   const { searchId } = req.params;
 
   // ── SSE Headers ──────────────────────────────────────────────────────────────

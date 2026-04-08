@@ -9,12 +9,13 @@ const express = require('express');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const redis = require('../redis');
+const auth = require('../middleware/auth');
 
 const router = express.Router();
 const SCRAPER_URL = process.env.SCRAPER_URL || 'http://localhost:8001';
 const CACHE_TTL_SECONDS = 300; // Cache results for 5 minutes
 
-router.post('/', async (req, res) => {
+router.post('/', auth, async (req, res) => {
   const { query, lat, lon } = req.body;
 
   if (!query || query.trim().length < 3) {

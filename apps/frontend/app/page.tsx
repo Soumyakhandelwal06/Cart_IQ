@@ -9,8 +9,11 @@ const PLACEHOLDER_QUERIES = [
   "potatoes 2kg, onions 1kg, and 1 bread loaf",
 ];
 
+import { useAuth } from "@/context/AuthContext";
+
 export default function SearchPage() {
   const [query, setQuery] = useState("");
+  const { user, token, logout, loading: authLoading } = useAuth();
   const [placeholder, setPlaceholder] = useState("");
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const [charIdx, setCharIdx] = useState(0);
@@ -19,6 +22,12 @@ export default function SearchPage() {
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const router = useRouter();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/auth/login");
+    }
+  }, [user, authLoading, router]);
 
   // Animated placeholder typewriter effect
   useEffect(() => {
@@ -49,6 +58,14 @@ export default function SearchPage() {
     }
   }, []);
 
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
@@ -59,9 +76,13 @@ export default function SearchPage() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const res = await fetch(`${apiUrl}/api/v1/query`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ query, lat: location?.lat, lon: location?.lon }),
       });
+      // ...
 
       if (!res.ok) {
         const err = await res.json();
@@ -86,15 +107,38 @@ export default function SearchPage() {
       <div className="bg-grid" />
 
       {/* All content sits above the orbs */}
+      <div className="absolute top-6 right-20 z-20 flex items-center gap-4 animate-fade-in">
+        <div className="flex flex-col items-end">
+          <span className="text-white text-sm font-semibold">{user.name || user.phone}</span>
+          <div className="flex gap-3 items-center">
+            <button 
+              onClick={() => router.push("/profile")}
+              className="text-xs text-gray-500 hover:text-violet-400 transition-colors"
+            >
+              Linked Accounts
+            </button>
+            <button 
+              onClick={logout}
+              className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+        <div className="w-10 h-10 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-lg">
+          👤
+        </div>
+      </div>
+
       <div className="relative z-10 w-full flex flex-col items-center justify-center">
-      {/* Logo / Header */}
-      <div className="mb-10 text-center animate-slide-up">
+        {/* Logo / Header */}
+        <div className="mb-10 text-center animate-slide-up">
         <div className="inline-flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-orange-400 flex items-center justify-center text-xl">
             🛒
           </div>
           <h1
-            className="text-3xl font-bold tracking-tight"
+            className="text-3xl font-bold tracking-tight text-white dark:text-white"
             style={{ fontFamily: "var(--font-outfit)" }}
           >
             Quick<span className="text-violet-400">Cart</span>

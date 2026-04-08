@@ -1,0 +1,17 @@
+-rw-r--r--@ 1 soumyakhandelwal  staff  178018 Mar  4 00:24 blinkit_debug.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 11:29 debug_instamart_after_retry.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 01:39 debug_instamart_kissan_tomato_sauce.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  418234 Mar  4 11:29 debug_instamart_landed.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 01:39 debug_instamart_onion.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 11:29 debug_instamart_search_results.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  457143 Apr  5 20:42 debug_zepto_1_landing.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  269984 Apr  5 20:42 debug_zepto_2_after_popups.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  457696 Apr  5 20:42 debug_zepto_3_after_login_click.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  457403 Apr  5 20:42 debug_zepto_error.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 01:40 final_instamart_debug_onion.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  421675 Mar  4 17:28 instamart_debug_results.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   35886 Mar  4 01:11 instamart_debug.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   37146 Mar  4 01:14 instamart_desktop_debug.png
+-rw-r--r--@ 1 soumyakhandelwal  staff   35880 Mar  4 01:20 instamart_post_retry_debug.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  657396 Mar  4 01:11 zepto_debug_v2.png
+-rw-r--r--@ 1 soumyakhandelwal  staff  657406 Mar  4 01:10 zepto_debug.png

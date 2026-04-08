@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.parse import router as parse_router
 from routes.scrape import router as scrape_router
+from routes.auth import router as auth_router
 
 load_dotenv()
 
@@ -27,6 +28,7 @@ app.add_middleware(
 
 app.include_router(parse_router, prefix="/parse", tags=["Parser"])
 app.include_router(scrape_router, prefix="/scrape", tags=["Scraper"])
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 
 
 @app.get("/health")

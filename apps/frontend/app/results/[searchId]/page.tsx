@@ -49,23 +49,33 @@ const STATUS_MESSAGES: Record<string, string> = {
   scraping: "🔍 Checking prices across all platforms...",
 };
 
+import { useAuth } from "@/context/AuthContext";
+
 export default function ResultsPage() {
   const { searchId } = useParams() as { searchId: string };
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user, token, loading: authLoading } = useAuth();
   const query = searchParams.get("query") || "";
   const [state, setState] = useState<ProgressState>({ status: "connecting" });
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!searchId) return;
+    if (!authLoading && !user) {
+      router.push("/auth/login");
+    }
+  }, [user, authLoading, router]);
+
+  useEffect(() => {
+    if (!searchId || authLoading || !user) return;
     let retryCount = 0;
     const maxRetries = 5;
     let es: EventSource;
 
     const connect = () => {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-      es = new EventSource(`${apiUrl}/api/v1/stream/${searchId}`);
+      // EventSource doesn't support headers, so we pass token in query param
+      es = new EventSource(`${apiUrl}/api/v1/stream/${searchId}?token=${token}`);
       esRef.current = es;
 
       es.addEventListener("progress", (e) => {
@@ -109,6 +119,14 @@ export default function ResultsPage() {
     return () => es?.close();
   }, [searchId, state.status]);
 
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <main className="gradient-mesh min-h-screen px-4 py-8">
       {/* Header */}
@@ -121,11 +139,28 @@ export default function ResultsPage() {
             ← Back
           </button>
           <div className="flex items-center gap-2">
-            <span className="text-2xl font-bold" style={{ fontFamily: "var(--font-outfit)" }}>
+            <span className="text-2xl font-bold text-white" style={{ fontFamily: "var(--font-outfit)" }}>
               Quick<span className="text-violet-400">Cart</span>
             </span>
           </div>
-          <div className="w-16" />
+
+          <div className="flex items-center gap-4 animate-fade-in">
+            <div className="flex flex-col items-end">
+              <span className="text-white text-sm font-semibold">{user.name || user.phone}</span>
+              <button 
+                onClick={() => {
+                  const { logout } = require("@/context/AuthContext").useAuth();
+                  logout();
+                }}
+                className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-lg">
+              👤
+            </div>
+          </div>
         </div>
 
         {query && (

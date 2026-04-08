@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import ThemeToggle from "@/components/ThemeToggle";
+import { AuthProvider } from "@/context/AuthContext";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${outfit.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${outfit.variable}`}>
       {/* Prevent theme flash — runs before React hydrates */}
       <head>
         <script
@@ -32,11 +33,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased" suppressHydrationWarning>
-        {/* Global theme toggle — fixed top-right on every page */}
-        <div className="fixed top-4 right-4 z-[200]">
-          <ThemeToggle />
-        </div>
-        {children}
+        <AuthProvider>
+          {/* Global theme toggle — fixed top-right on every page */}
+          <div className="fixed top-6 right-6 z-[200]">
+            <ThemeToggle />
+          </div>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
