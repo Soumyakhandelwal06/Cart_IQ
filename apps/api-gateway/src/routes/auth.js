@@ -28,7 +28,7 @@ router.post('/send-otp', async (req, res) => {
     console.log(`🔐 OTP for ${phone}: ${otp} (SMS Sent: ${sent})`);
     console.log(`--------------------------------------\n`);
 
-    if (!sent) {
+    if (!sent && process.env.NODE_ENV === 'production') {
       return res.status(500).json({ error: 'Failed to send SMS OTP. Check server logs.' });
     }
 

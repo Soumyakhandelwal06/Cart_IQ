@@ -19,6 +19,7 @@ export default function ProfilePage() {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<"init" | "otp">("init");
+  const [isVerifying, setIsVerifying] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const setError = (platform: string, msg: string) =>
     setErrors((prev) => ({ ...prev, [platform]: msg }));
@@ -69,7 +70,8 @@ export default function ProfilePage() {
   };
 
   const handleVerifyOtp = async () => {
-    if (!connecting) return;
+    if (!connecting || isVerifying) return;
+    setIsVerifying(true);
     clearError(connecting);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -90,6 +92,8 @@ export default function ProfilePage() {
       await fetchStatus();
     } catch (err: any) {
       setError(connecting, err.message);
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -214,9 +218,10 @@ export default function ProfilePage() {
                       />
                       <button 
                         onClick={handleVerifyOtp}
-                        className="bg-violet-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-violet-500 transition-all"
+                        disabled={isVerifying}
+                        className="bg-violet-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Verify
+                        {isVerifying ? "Verifying..." : "Verify"}
                       </button>
                     </div>
                     {errors[p.id] && <p className="mt-3 text-red-400 text-sm">⚠️ {errors[p.id]}</p>}
