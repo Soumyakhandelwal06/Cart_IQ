@@ -3,6 +3,7 @@
 # Run this from the "Minor 2" project root: bash start.sh
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 echo ""
 echo "🛒 Starting CartIQ..."
