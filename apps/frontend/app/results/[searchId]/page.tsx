@@ -225,6 +225,7 @@ export default function ResultsPage() {
           <WinnerBanner
             winner={state.data.winner}
             platforms={state.data.platforms}
+            searchId={searchId}
           />
 
           {/* Platform Columns */}

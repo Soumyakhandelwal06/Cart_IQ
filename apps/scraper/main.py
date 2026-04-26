@@ -9,13 +9,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.parse import router as parse_router
 from routes.scrape import router as scrape_router
 from routes.auth import router as auth_router
+from routes.checkout import router as checkout_router
 
 load_dotenv()
+
+from playwright.async_api import async_playwright
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    pw = async_playwright()
+    p_obj = await pw.start()
+    app.state.playwright = p_obj
+    yield
+    await p_obj.stop()
 
 app = FastAPI(
     title="CartIQ Scraper Service",
     description="LLM-powered Query Parser + Platform Scrapers",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -29,6 +42,7 @@ app.add_middleware(
 app.include_router(parse_router, prefix="/parse", tags=["Parser"])
 app.include_router(scrape_router, prefix="/scrape", tags=["Scraper"])
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(checkout_router, prefix="/checkout", tags=["Checkout"])
 
 
 @app.get("/health")

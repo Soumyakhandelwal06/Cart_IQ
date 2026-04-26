@@ -77,7 +77,7 @@ async function _runPipeline(searchId, query, lat, lon) {
     const scrapeData = scrapeRes.data;
 
     // ── Step 4: Cache the result ─────────────────────────────────────────────
-    await redis.setex(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(scrapeData)).catch(() => {});
+    await redis.set(cacheKey, JSON.stringify(scrapeData), 'EX', CACHE_TTL_SECONDS).catch(() => {});
 
     // ── Step 5: Publish final results ────────────────────────────────────────
     await _publishState(searchId, {
@@ -93,7 +93,7 @@ async function _runPipeline(searchId, query, lat, lon) {
 
 async function _publishState(searchId, state) {
   const ttl = 120; // Keep state alive for 2 minutes for SSE clients
-  await redis.setex(`qc:state:${searchId}`, ttl, JSON.stringify(state)).catch(() => {
+  await redis.set(`qc:state:${searchId}`, JSON.stringify(state), 'EX', ttl).catch(() => {
     // If Redis is down, we still need the SSE to work — store in a Map
     global._fallbackStore = global._fallbackStore || new Map();
     global._fallbackStore.set(searchId, state);

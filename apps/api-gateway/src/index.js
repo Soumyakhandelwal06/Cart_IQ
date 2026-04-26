@@ -14,6 +14,7 @@ const queryRouter = require('./routes/query');
 const streamRouter = require('./routes/stream');
 const authRouter = require('./routes/auth');
 const platformsRouter = require('./routes/platforms');
+const checkoutRouter = require('./routes/checkout');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,7 +24,9 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({ 
   origin: [
     'http://localhost:3000', 
-    'http://localhost:3003'
+    'http://localhost:3003',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3003'
   ],
   credentials: true
 }));
@@ -43,6 +46,7 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/query', queryRouter);
 app.use('/api/v1/stream', streamRouter);
 app.use('/api/v1/platforms', platformsRouter);
+app.use('/api/v1/checkout', checkoutRouter);
 
 // Health check
 app.get('/health', (req, res) => {

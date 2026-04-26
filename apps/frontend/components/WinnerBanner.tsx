@@ -1,6 +1,8 @@
 "use client";
+import { useState } from "react";
 import { PlatformCart } from "@/app/results/[searchId]/page";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/context/AuthContext";
 
 const PLATFORM_COLORS: Record<string, { bg: string; text: string }> = {
   blinkit: { bg: "from-yellow-500/20 to-yellow-900/10", text: "text-yellow-400" },
@@ -35,11 +37,16 @@ const PLATFORM_CHECKOUT_BASE: Record<string, string> = {
 export default function WinnerBanner({
   winner,
   platforms,
+  searchId,
 }: {
   winner: string;
   platforms: PlatformCart[];
+  searchId: string;
 }) {
   const theme = useTheme();
+  const { token } = useAuth();
+  const [syncing, setSyncing] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
   const winnerPlatform = platforms.find((p) => p.platform === winner);
   if (!winnerPlatform) return null;
 
@@ -97,20 +104,53 @@ export default function WinnerBanner({
         </div>
 
         <div className="flex flex-col gap-3">
-          <a
-            href={checkoutUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            id="winner-checkout-btn"
-            className="group relative flex-shrink-0 flex items-center justify-center gap-3 bg-white text-black hover:bg-emerald-50 transition-all duration-300 active:scale-95 shadow-xl shadow-white/10 px-10 py-5 rounded-2xl font-black text-lg overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="relative z-10 flex items-center gap-2">
-              Instant Purchase <span className="text-2xl transition-transform group-hover:translate-x-1">→</span>
-            </span>
-          </a>
+          {["zepto", "blinkit", "bigbasket"].includes(winner) ? (
+            <button
+              onClick={async () => {
+                if (!token) return alert("Please login first to sync your cart.");
+                setSyncing(true);
+                setSyncSuccess(false);
+                try {
+                  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/v1/checkout`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ platform: winner, search_id: searchId }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) alert(data.error || "Failed to sync cart");
+                  else {
+                    setSyncSuccess(true);
+                    setTimeout(() => setSyncSuccess(false), 5000);
+                  }
+                } catch (err) {
+                  alert("Network error occurred while syncing cart.");
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+              disabled={syncing}
+              className="group relative flex-shrink-0 flex items-center justify-center gap-3 bg-white text-black hover:bg-emerald-50 transition-all duration-300 active:scale-95 shadow-xl shadow-white/10 px-8 py-4 rounded-2xl font-black text-lg overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="relative z-10 flex items-center gap-2">
+                {syncing ? `Syncing to ${winnerPlatform.platform_display}...` : syncSuccess ? "✅ Items Synced!" : `Sync to my ${winnerPlatform.platform_display} Cart`} 
+              </span>
+            </button>
+          ) : (
+            <a
+              href={checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              id="winner-checkout-btn"
+              className="group relative flex-shrink-0 flex items-center justify-center gap-3 bg-white text-black hover:bg-emerald-50 transition-all duration-300 active:scale-95 shadow-xl shadow-white/10 px-10 py-5 rounded-2xl font-black text-lg overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="relative z-10 flex items-center gap-2">
+                Instant Purchase <span className="text-2xl transition-transform group-hover:translate-x-1">→</span>
+              </span>
+            </a>
+          )}
           <p className="text-center text-[10px] text-gray-500 font-medium uppercase tracking-widest">
-            Secure Transaction on {winnerPlatform.platform_display}
+            {["zepto", "blinkit", "bigbasket"].includes(winner) ? "Automated Sync via CartIQ" : `Secure Transaction on ${winnerPlatform.platform_display}`}
           </p>
         </div>
       </div>

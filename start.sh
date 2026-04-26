@@ -53,14 +53,14 @@ fi
 echo ""
 echo "🎨 Starting Next.js Frontend on :3000 ..."
 cd "$PROJECT_DIR/apps/frontend"
-npm run dev &
+HOSTNAME=127.0.0.1 npm run dev -- -p 3000 &
 FRONTEND_PID=$!
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅ All services starting!"
 echo ""
-echo "   🌐  Open: http://localhost:3000"
+echo "   🌐  Open: http://127.0.0.1:3000"
 echo ""
 echo "   To stop all: kill $SCRAPER_PID $API_PID $FRONTEND_PID"
 echo "   Or run:      bash stop.sh"
