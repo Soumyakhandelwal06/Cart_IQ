@@ -11,10 +11,10 @@ class CheckoutItem(BaseModel):
     quantity: int
     name: Optional[str] = None
 
-CLICK_PRODUCT_BTN_JS = """
+CLICK_PRODUCT_BTN_JS = r"""
 (name) => {
     try {
-        const searchWords = name.toLowerCase().split(' ').filter(w => w.length > 2).slice(0, 4);
+        const searchWords = name.toLowerCase().replace(/\n/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 4);
         const els = Array.from(document.querySelectorAll('div, p, span, h1, h2, h3, h4'))
             .filter(e => {
                 const txt = (e.innerText || "").toLowerCase();

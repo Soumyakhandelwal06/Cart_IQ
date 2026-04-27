@@ -86,6 +86,7 @@ async function _runPipeline(searchId, query, lat, lon) {
     });
 
   } catch (err) {
+    console.error(`[${searchId}] Pipeline Error:`, err);
     const msg = err.response?.data?.detail || err.message || 'Unknown error';
     await _publishState(searchId, { status: 'error', error: msg });
   }

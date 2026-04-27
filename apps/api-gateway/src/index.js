@@ -2,7 +2,8 @@
  * CartIQ API Gateway — Main Server
  * Orchestrates NL query parsing, scraping dispatch, and SSE streaming
  */
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 require('./db/mongoose'); // Connect to MongoDB
 const express = require('express');
 const cors = require('cors');
