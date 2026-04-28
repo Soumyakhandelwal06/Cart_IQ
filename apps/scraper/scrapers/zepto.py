@@ -245,14 +245,14 @@ async def _extract_first_product_zepto(page, item) -> Optional[dict]:
     """, query_words)
 
     if products and len(products) > 0:
-        # Strict brand matching: if a brand is requested, filter out products that don't contain it
+        # Brand matching: if a brand is requested, prefer products that contain it
         if item.brand:
             brand_lower = item.brand.lower()
             brand_products = [p for p in products if brand_lower in p["name"].lower()]
-            if not brand_products:
-                print(f"[Zepto] Strict brand match failed: '{item.brand}' not in any results.")
-                return None
-            products = brand_products
+            if brand_products:
+                products = brand_products
+            else:
+                print(f"[Zepto] Brand '{item.brand}' not found, falling back to other brands.")
 
         req_pieces = get_requested_pieces(item)
         

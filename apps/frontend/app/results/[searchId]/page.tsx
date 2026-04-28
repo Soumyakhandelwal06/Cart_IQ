@@ -236,6 +236,7 @@ export default function ResultsPage() {
                 platform={platform}
                 isWinner={platform.platform === state.data!.winner}
                 animationDelay={i * 0.1}
+                searchId={searchId}
               />
             ))}
           </div>

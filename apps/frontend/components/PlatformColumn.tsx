@@ -1,6 +1,8 @@
 "use client";
+import { useState } from "react";
 import { PlatformCart } from "@/app/results/[searchId]/page";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/context/AuthContext";
 
 const PLATFORM_ICONS: Record<string, string> = {
   blinkit: "🟡",
@@ -25,8 +27,12 @@ export default function PlatformColumn({
   platform: PlatformCart;
   isWinner: boolean;
   animationDelay: number;
+  searchId: string;
 }) {
   const theme = useTheme();
+  const { token } = useAuth();
+  const [syncing, setSyncing] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
   // Build a search query from all item names for the platform URL
   const searchQuery = platform.items
     .filter((i) => i.available)
@@ -39,6 +45,29 @@ export default function PlatformColumn({
 
   const handleCheckout = () => {
     window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleSyncCart = async () => {
+    if (!token) return alert("Please login first to sync your cart.");
+    setSyncing(true);
+    setSyncSuccess(false);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/v1/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ platform: platform.platform, search_id: searchId }),
+      });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || "Failed to sync cart");
+      else {
+        setSyncSuccess(true);
+        setTimeout(() => setSyncSuccess(false), 5000);
+      }
+    } catch (err) {
+      alert("Network error occurred while syncing cart.");
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -140,20 +169,37 @@ export default function PlatformColumn({
 
       {/* Checkout Button */}
       <div className="px-6 py-5">
-        <button
-          onClick={handleCheckout}
-          id={`checkout-${platform.platform}`}
-          disabled={!platform.all_items_available && platform.item_total === 0}
-          className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${isWinner
-            ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
-            : theme === "light"
-              ? "text-[#ffffff]"
-              : "bg-gray-800 hover:bg-gray-700 text-gray-200"
-            } ${(!platform.all_items_available && platform.item_total === 0) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-          style={!isWinner && theme === "light" ? { background: "#1e293b", color: "#ffffff" } : undefined}
-        >
-          {isWinner ? "Order Now" : `Shop on ${platform.platform_display}`} →
-        </button>
+        {["zepto", "blinkit", "bigbasket"].includes(platform.platform) ? (
+          <button
+            onClick={handleSyncCart}
+            id={`sync-${platform.platform}`}
+            disabled={(!platform.all_items_available && platform.item_total === 0) || syncing}
+            className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${isWinner
+              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
+              : theme === "light"
+                ? "bg-violet-600 hover:bg-violet-500 text-[#ffffff]"
+                : "bg-gray-800 hover:bg-gray-700 text-gray-200"
+              } ${(!platform.all_items_available && platform.item_total === 0) || syncing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+            style={!isWinner && theme === "light" ? { background: "#7c3aed", color: "#ffffff" } : undefined}
+          >
+            {syncing ? `Syncing...` : syncSuccess ? "✅ Synced!" : `Sync to ${platform.platform_display}`}
+          </button>
+        ) : (
+          <button
+            onClick={handleCheckout}
+            id={`checkout-${platform.platform}`}
+            disabled={!platform.all_items_available && platform.item_total === 0}
+            className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${isWinner
+              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
+              : theme === "light"
+                ? "text-[#ffffff]"
+                : "bg-gray-800 hover:bg-gray-700 text-gray-200"
+              } ${(!platform.all_items_available && platform.item_total === 0) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+            style={!isWinner && theme === "light" ? { background: "#1e293b", color: "#ffffff" } : undefined}
+          >
+            {isWinner ? "Order Now" : `Shop on ${platform.platform_display}`} →
+          </button>
+        )}
       </div>
     </div>
   );

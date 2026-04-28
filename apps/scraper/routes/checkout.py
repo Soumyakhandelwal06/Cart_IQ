@@ -28,7 +28,9 @@ CLICK_PRODUCT_BTN_JS = r"""
             let plusBtn = Array.from(current.querySelectorAll('div, button, span, a'))
                 .find(e => {
                     const t = (e.innerText || "").trim();
-                    return t === '+' || t === 'Increase Quantity';
+                    const aria = (e.getAttribute && e.getAttribute('aria-label') || "").trim().toLowerCase();
+                    const cls = (e.className && typeof e.className === 'string' ? e.className : "").toLowerCase();
+                    return t === '+' || t === 'Increase Quantity' || aria.includes('increase') || aria.includes('plus') || cls.includes('plus') || cls.includes('increment');
                 });
             let addBtn = Array.from(current.querySelectorAll('div, button, span, a'))
                 .find(e => {
