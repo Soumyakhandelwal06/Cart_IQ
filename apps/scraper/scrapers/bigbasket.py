@@ -327,14 +327,15 @@ async def _extract_from_page(page, item) -> Optional[dict]:
 
 def _score_and_pick(products, query_words, item):
     if not products: return None
-        # Brand matching: if a brand is requested, prefer products that contain it
-        if item.brand:
-            brand_lower = item.brand.lower()
-            brand_products = [p for p in products if brand_lower in p["name"].lower()]
-            if brand_products:
-                products = brand_products
-            else:
-                print(f"[Bigbasket] Brand '{item.brand}' not found, falling back to other brands.")
+    
+    # Brand matching: if a brand is requested, prefer products that contain it
+    if item.brand:
+        brand_lower = item.brand.lower()
+        brand_products = [p for p in products if brand_lower in p["name"].lower()]
+        if brand_products:
+            products = brand_products
+        else:
+            print(f"[Bigbasket] Brand '{item.brand}' not found, falling back to other brands.")
         
     unique = []
     seen = set()
@@ -365,7 +366,16 @@ def _score_and_pick(products, query_words, item):
         print(f"[BigBasket] No products found containing query keywords: {query_words}")
         return None
     
-    best = max(valid_products, key=score)
+    # If no brand is specified, pick the cheapest among the top-scoring products
+    # (same relevance = same item, just different brands → pick min price)
+    if not item.brand:
+        top_score = score(max(valid_products, key=score))
+        top_products = [p for p in valid_products if score(p) == top_score]
+        best = min(top_products, key=lambda p: p["price"])
+        if len(top_products) > 1:
+            print(f"[BigBasket] No brand specified — picking cheapest among {len(top_products)} matches: {best['name']} @ ₹{best['price']}")
+    else:
+        best = max(valid_products, key=score)
     clean_name = " ".join(best["name"].split())[:60]
     return {
         "name": clean_name,

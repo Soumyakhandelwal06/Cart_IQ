@@ -190,9 +190,11 @@ async def _extract_first_product_blinkit(page, item) -> Optional[dict]:
                         const nameNoSpace = foundName.toLowerCase().replace(/\\s/g, '');
                         const weightNoSpace = foundWeight.toLowerCase().replace(/\\s/g, '');
                         if (!nameNoSpace.includes(weightNoSpace)) {
-                            foundName = foundName + ' ' + foundWeight;
+                            foundName = foundName.trim() + ' ' + foundWeight.trim();
                         }
                     }
+                    // Normalize: remove all newlines and extra spaces from name
+                    foundName = foundName.replace(/[\\n\\r]/g, ' ').replace(/\\s+/g, ' ').trim();
                     
                     // Try to find the product URL (nearest <a> tag with a product-style href)
                     let url = null;
@@ -256,13 +258,28 @@ async def _extract_first_product_blinkit(page, item) -> Optional[dict]:
             print(f"[Blinkit] No products found containing query keywords: {query_words}")
             return None
         
-        best = max(valid_products, key=score)
+        # If no brand is specified, pick the cheapest among the top-scoring products
+        # (same relevance = same item, just different brands → pick min price)
+        if not item.brand:
+            top_score = score(max(valid_products, key=score))
+            top_products = [p for p in valid_products if score(p) == top_score]
+            best = min(top_products, key=lambda p: p["price"])
+            if len(top_products) > 1:
+                print(f"[Blinkit] No brand specified — picking cheapest among {len(top_products)} matches: {best['name']} @ ₹{best['price']}")
+        else:
+            best = max(valid_products, key=score)
+        # Sanitize name: remove newlines, collapse whitespace
+        clean_name = " ".join(best["name"].replace("\n", " ").replace("\r", " ").split())[:60]
+        # Sanitize URL: remove newline-encoded characters
+        clean_url = best.get("url", "") or ""
+        if "\n" in clean_url or "%0A" in clean_url or "%0a" in clean_url:
+            clean_url = f"https://blinkit.com/s/?q={'+'.join(clean_name.split()[:4])}"
         return {
-            "name": best["name"][:60],
+            "name": clean_name,
             "price": best["price"],
-            "url": best.get("url"),
+            "url": clean_url or None,
             "image_url": best.get("image_url"),
-            "per_kg": "kg" in best["name"].lower() or "kg" in item.name.lower()
+            "per_kg": "kg" in clean_name.lower() or "kg" in item.name.lower()
         }
 
     return None

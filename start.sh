@@ -18,8 +18,7 @@ sleep 1
 # ── Python Scraper (port 8001) ────────────────────────────────────────────────
 echo "🐍 Starting Python Scraper on :8001 ..."
 cd "$PROJECT_DIR/apps/scraper"
-source venv/bin/activate
-nohup uvicorn main:app --port 8001 > /tmp/qc-scraper.log 2>&1 &
+nohup "$PROJECT_DIR/apps/scraper/venv/bin/python" -m uvicorn main:app --host 127.0.0.1 --port 8001 > /tmp/qc-scraper.log 2>&1 &
 SCRAPER_PID=$!
 echo "   PID: $SCRAPER_PID (logs: /tmp/qc-scraper.log)"
 

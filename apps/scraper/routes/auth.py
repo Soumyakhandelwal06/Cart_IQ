@@ -27,7 +27,7 @@ PLATFORM_CONFIGS = {
         "login_trigger": "button[aria-label='login'], button:has-text('Login')",
         "phone_input": "input[type='tel'], input[placeholder*='mobile']",
         "continue_btn": "button:has-text('Continue')",
-        "otp_input_selector": "input[type='text'], input[maxLength='6']",
+        "otp_input_selector": "input[autocomplete='one-time-code'], input[maxLength='6'], input[maxlength='1'], div:has-text('Enter OTP') input",
         "verify_btn": "button:has-text('Verify'), button:has-text('Submit')",
         "otp_len": 6
     },
@@ -116,9 +116,8 @@ async def trigger_otp(platform: str, request: AuthRequest, background_tasks: Bac
     
     try:
         pw = await async_playwright().start()
-        # Bigbasket's Akamai CDN blocks headless browsers ("Access Denied").
-        # Use headless=False (visible window) for Bigbasket only to bypass TLS fingerprint detection.
-        is_headless = platform != "bigbasket"
+        # Use headless=False (visible window) for all platforms to bypass TLS fingerprint detection.
+        is_headless = False
         browser = await pw.chromium.launch(
             headless=is_headless,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"] if not is_headless else []
@@ -492,7 +491,6 @@ async def verify_otp(platform: str, request: VerifyRequest):
     try:
         print(f"[Auth] Verifying OTP for {platform}...")
         
-        # 2. Click Verify (with Universal-Frame Search)
         target_frame = page
         if platform == "bigbasket":
             print("[Auth] Scanning for Bigbasket Verify Iframe...")
@@ -504,39 +502,67 @@ async def verify_otp(platform: str, request: VerifyRequest):
                         break
                 except: continue
 
-        # 1.5 Fill the OTP digits
+        # Fill the OTP digits
         try:
             if config.get("otp_input_selector"):
                 otp_input = target_frame.locator(config["otp_input_selector"]).first
                 await otp_input.wait_for(state="visible", timeout=8000)
                 await otp_input.scroll_into_view_if_needed()
                 await otp_input.click(force=True)
-                await otp_input.type(str(request.otp), delay=100)
+                await otp_input.type(str(request.otp), delay=150)
                 print(f"[Auth] ✅ Typed OTP: {request.otp}")
-                await asyncio.sleep(1) # wait for framework to register OTP
+                await asyncio.sleep(2)  # wait for framework to register OTP
         except Exception as e:
             print(f"[Auth] Failed to type OTP: {e}")
 
+        # Click verify button only for platforms that have one (not Zepto — it auto-submits)
         if config["verify_btn"]:
             try:
                 verify_btn = await target_frame.wait_for_selector(config["verify_btn"], timeout=10000)
                 await verify_btn.click()
+                print(f"[Auth] Clicked verify button.")
             except Exception as e:
-                print(f"[Auth] Verify button error: {e}")
+                print(f"[Auth] Verify button error (may be OK if auto-submit): {e}")
 
-        # 3. Wait for Success
-        await asyncio.sleep(5)
+        # For Zepto: after OTP is typed, it auto-submits.
+        # Wait up to 15 seconds for the login modal to close and profile to appear
+        if platform == "zepto":
+            print(f"[Auth] Zepto: Waiting for login to succeed...")
+            try:
+                # Look for a sign of successful login: the login modal is gone AND the 'Login' button in header is gone
+                is_logged_in = False
+                for _ in range(15):
+                    login_modal = await page.query_selector("text='Enter OTP'")
+                    
+                    if not login_modal:
+                        is_logged_in = True
+                        print(f"[Auth] Zepto: Login successful (modal is gone)!")
+                        break
+                    await asyncio.sleep(1)
+                
+                if not is_logged_in:
+                    print(f"[Auth] Zepto: Login validation timed out. Assuming failed login.")
+                    raise Exception("OTP rejected or login timed out. Please try again.")
+                
+                # Give 4 extra seconds for cookies and local storage to fully settle
+                await asyncio.sleep(4)
+            except Exception as e:
+                print(f"[Auth] Zepto login failed: {e}")
+                raise
+        else:
+            # Non-Zepto: generic wait for success
+            await asyncio.sleep(5)
         
-        # 4. Capture Storage State (wrapped in try/except in case page automatically closed on success)
+        # Capture Storage State
         storage_state = None
         try:
             storage_state = await context.storage_state()
-            print("[Auth] Successfully captured storage state.")
+            cookie_count = len(storage_state.get('cookies', []))
+            print(f"[Auth] ✅ Captured storage state: {cookie_count} cookies from {page.url}")
+            if cookie_count == 0:
+                print(f"[Auth] ⚠️ WARNING: Zero cookies captured — login may have failed!")
         except Exception as e:
-            print(f"[Auth] Warning: Could not capture storage state (page may have auto-closed on success): {e}")
-            # If we failed to get storage state, we can't save it, but we can return success if it was due to target closed.
-            pass
-
+            print(f"[Auth] Warning: Could not capture storage state: {e}")
         
         # Cleanup
         await session["browser"].close()

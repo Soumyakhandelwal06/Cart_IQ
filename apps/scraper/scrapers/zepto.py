@@ -141,104 +141,67 @@ async def _extract_first_product_zepto(page, item) -> Optional[dict]:
         (queryWords) => {
             const results = [];
             
-            // Find all elements containing ₹
-            const allElements = Array.from(document.querySelectorAll('div, span, p, h1, h2, h3, h4'));
-            const priceElements = allElements.filter(el => {
-                const txt = el.innerText || "";
-                return txt.includes('₹') && 
-                       /₹\\s*\\d+/.test(txt) &&
-                       el.children.length === 0
-            });
+            // Link-first approach: find all product card links (/pn/ URLs)
+            // This guarantees the URL always belongs to the product we extract.
+            const productLinks = Array.from(document.querySelectorAll('a[href*="/pn/"]'));
+            const seen = new Set();
             
-            for (const pEl of priceElements) {
-                const priceText = pEl.innerText || "";
-                const match = priceText.match(/₹\\s*(\\d+)/);
-                if (!match) continue;
-                const price = parseFloat(match[1]);
-                if (price < 1 || price > 10000) continue;
+            for (const link of productLinks) {
+                const url = link.href;
+                if (!url || seen.has(url)) continue;
                 
-                let current = pEl;
+                // Get all text inside this product card
+                const allText = Array.from(link.querySelectorAll('div, span, p, h1, h2, h3, h4'))
+                    .map(el => (el.innerText || '').trim())
+                    .filter(t => t.length > 0);
+                
+                // Find the product name: first text that matches any query word
                 let foundName = null;
-                let searchSteps = 0;
+                for (const t of allText) {
+                    if (t.length > 3 && t.length < 120 && !t.includes('₹') && 
+                        queryWords.some(w => t.toLowerCase().includes(w))) {
+                        foundName = t;
+                        break;
+                    }
+                }
+                if (!foundName) continue;
                 
-                while (current && searchSteps < 10) {
-                    // Get all candidate text elements within this ancestor
-                    const candidates = Array.from(current.querySelectorAll('div, span, p, h1, h2, h3, h4'))
-                        .map(el => (el.innerText || "").trim())
-                        .filter(t => t.length > 3 && t.length < 100 && !t.includes('₹') && !t.toLowerCase().includes('showing results'));
-                        
-                    for (const cand of candidates) {
-                        const lowerCand = cand.toLowerCase();
-                        if (queryWords.some(w => lowerCand.includes(w))) {
-                            foundName = cand;
-                            break;
+                // Find the price: first ₹N pattern in the card
+                let price = null;
+                for (const t of allText) {
+                    const m = t.match(/₹\s*(\d+(?:\.\d+)?)/);
+                    if (m) {
+                        const p = parseFloat(m[1]);
+                        if (p >= 1 && p <= 10000) { price = p; break; }
+                    }
+                }
+                if (!price) continue;
+                
+                // Append weight info to name
+                const weightRegex = /(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|gm|ltr|pcs|pc|pieces|units|pack))/gi;
+                const allWeights = [];
+                for (const t of allText) {
+                    const matches = [...t.matchAll(weightRegex)];
+                    for (const m of matches) {
+                        const w = m[1].trim().toLowerCase();
+                        if (!allWeights.includes(w)) allWeights.push(w);
+                    }
+                }
+                if (allWeights.length > 0) {
+                    const nameNoSpace = foundName.toLowerCase().replace(/\s/g, '');
+                    for (const w of allWeights) {
+                        if (!nameNoSpace.includes(w.replace(/\s/g, ''))) {
+                            foundName = foundName + ' ' + w;
                         }
                     }
-                    if (foundName) break;
-                    
-                    current = current.parentElement;
-                    searchSteps++;
                 }
                 
-                if (foundName && price) {
-                    let foundWeight = null;
-                    const weightRegex = /(\\d+(?:\\.\\d+)?\\s*(?:g|kg|ml|l|gm|ltr|pcs|pc|pieces|units|pack))/gi;
-                    const finalCandidates = Array.from(current.querySelectorAll('div, span, p'))
-                        .map(el => (el.innerText || "").trim());
-                        
-                    let allWeights = [];
-                    for (const cand of finalCandidates) {
-                        const matches = [...cand.matchAll(weightRegex)];
-                        for (const m of matches) {
-                            if (!allWeights.includes(m[1].trim().toLowerCase())) {
-                                allWeights.push(m[1].trim().toLowerCase());
-                            }
-                        }
-                    }
-                    if (allWeights.length > 0) {
-                        foundWeight = allWeights.join(' ');
-                        const nameNoSpace = foundName.toLowerCase().replace(/\\s/g, '');
-                        for (const w of allWeights) {
-                            const weightNoSpace = w.replace(/\\s/g, '');
-                            if (!nameNoSpace.includes(weightNoSpace)) {
-                                foundName = foundName + ' ' + w;
-                            }
-                        }
-                    }
-                    
-                    // Fallback for Zepto hiding piece counts on egg boxes (e.g. "Eggoz Protein Rich Farm Fresh White Eggs")
-                    if (!foundWeight && foundName.toLowerCase().includes('egg')) {
-                         const matchSix = urlCurrent.innerHTML.match(/6\\s*(?:pcs|piece)/i) || 
-                                          Array.from(current.querySelectorAll('*')).some(el => el.innerText && el.innerText.match(/6\\s*(?:pcs|piece)/i));
-                         if (matchSix || foundName.includes('6')) {
-                             foundName += ' 6 pcs';
-                         }
-                    }
-                    
-                    // Try to find the product URL (nearest <a> tag)
-                    let url = null;
-                    let urlCurrent = pEl;
-                    let urlSteps = 0;
-                    while (urlCurrent && urlSteps < 15) {
-                        if (urlCurrent.tagName === 'A' && urlCurrent.href) {
-                            url = urlCurrent.href;
-                            break;
-                        }
-                        const anchor = urlCurrent.querySelector('a[href]');
-                        if (anchor) {
-                            url = anchor.href;
-                            break;
-                        }
-                        urlCurrent = urlCurrent.parentElement;
-                        urlSteps++;
-                    }
-                    // 3. Find image
-                    let foundImage = null;
-                    const img = current.querySelector('img[src*="zepto"]');
-                    if (img) foundImage = img.src;
-
-                    results.push({ name: foundName, price: price, url: url, image_url: foundImage });
-                }
+                // Find image
+                const img = link.querySelector('img');
+                const image_url = img ? img.src : null;
+                
+                seen.add(url);
+                results.push({ name: foundName, price: price, url: url, image_url: image_url });
             }
             return results;
         }
@@ -277,7 +240,16 @@ async def _extract_first_product_zepto(page, item) -> Optional[dict]:
             print(f"[Zepto] No products found containing query keywords: {query_words}")
             return None
 
-        best = max(valid_products, key=score)
+        # If no brand is specified, pick the cheapest among the top-scoring products
+        # (same relevance = same item, just different brands → pick min price)
+        if not item.brand:
+            top_score = score(max(valid_products, key=score))
+            top_products = [p for p in valid_products if score(p) == top_score]
+            best = min(top_products, key=lambda p: p["price"])
+            if len(top_products) > 1:
+                print(f"[Zepto] No brand specified — picking cheapest among {len(top_products)} matches: {best['name']} @ ₹{best['price']}")
+        else:
+            best = max(valid_products, key=score)
         return {
             "name": best["name"][:60],
             "price": best["price"],

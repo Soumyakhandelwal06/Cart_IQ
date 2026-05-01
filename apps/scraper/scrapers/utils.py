@@ -5,19 +5,25 @@ from typing import List
 def parse_weight_to_grams(weight_str: str) -> float:
     if not weight_str:
         return 0.0
-    weight_str = weight_str.lower().replace(" ", "")
+    weight_str_lower = weight_str.lower().replace(" ", "")
     
-    # Extract number and unit
-    match = re.search(r'([\d.]+)(kg|g|l|ml)', weight_str)
-    if not match:
+    # Find ALL weight values in the string (handles ranges like "900g-1kg" or "900g - 1kg")
+    all_matches = re.findall(r'([\d.]+)(kg|g|l|ml)', weight_str_lower)
+    if not all_matches:
         return 0.0
-        
-    val = float(match.group(1))
-    unit = match.group(2)
     
-    if unit in ['kg', 'l']:
-        return val * 1000.0
-    return val
+    # Convert all found weights to grams and return the MAXIMUM
+    # (for ranges like "900g-1kg", the pack is effectively ~1kg, not 900g)
+    grams_values = []
+    for val_str, unit in all_matches:
+        val = float(val_str)
+        if unit in ['kg', 'l']:
+            grams_values.append(val * 1000.0)
+        else:
+            grams_values.append(val)
+    
+    return max(grams_values)
+
 
 def calculate_adjusted_quantity(requested_weight: str, matched_name: str, base_quantity: int = 1) -> int:
     if not requested_weight:
@@ -54,8 +60,13 @@ def parse_pieces_from_name(name: str) -> int:
     return 0
 
 def get_final_quantity(item, matched_name: str) -> int:
+    """
+    Returns how many units to add to cart to satisfy the user's requirement.
+    If the user asked for 2kg and the product is 500g, we add 4 units.
+    """
     req_qty = item.quantity
     
+    # If the user specified a weight, adjust quantity based on packet size
     if item.weight:
         req_g = parse_weight_to_grams(item.weight)
         if req_g > 0:
@@ -64,6 +75,7 @@ def get_final_quantity(item, matched_name: str) -> int:
                 multiplier = math.ceil(req_g / matched_g)
                 return req_qty * int(multiplier)
     
+    # For piece-based items (eggs etc.) with no weight specified, adjust for pack size
     matched_pieces = parse_pieces_from_name(matched_name)
     if matched_pieces > 1:
         packs_needed = math.ceil(req_qty / matched_pieces)

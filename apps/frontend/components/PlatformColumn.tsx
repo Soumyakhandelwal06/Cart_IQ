@@ -23,6 +23,7 @@ export default function PlatformColumn({
   platform,
   isWinner,
   animationDelay,
+  searchId,
 }: {
   platform: PlatformCart;
   isWinner: boolean;
@@ -63,8 +64,9 @@ export default function PlatformColumn({
         setSyncSuccess(true);
         setTimeout(() => setSyncSuccess(false), 5000);
       }
-    } catch (err) {
-      alert("Network error occurred while syncing cart.");
+    } catch (err: any) {
+      console.error("Sync error:", err);
+      alert("Network error: " + (err.message || String(err)));
     } finally {
       setSyncing(false);
     }
