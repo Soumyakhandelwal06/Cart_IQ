@@ -387,12 +387,22 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
 
 async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
-        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        headless=False, # Necessary to bypass BigBasket's Akamai bot protection
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--window-position=0,0",
+        ]
     )
     context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        viewport={"width": 1280, "height": 800},
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        viewport={"width": 1366, "height": 768},
+        extra_http_headers={
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Upgrade-Insecure-Requests": "1"
+        },
         storage_state=storage_state
     )
     await stealth_async(context)
