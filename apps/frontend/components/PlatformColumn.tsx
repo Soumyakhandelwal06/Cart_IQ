@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { PlatformCart } from "@/app/results/[searchId]/page";
 import { useTheme } from "@/hooks/useTheme";
-import { useAuth } from "@/context/AuthContext";
 
 const PLATFORM_ICONS: Record<string, string> = {
   blinkit: "🟡",
@@ -10,20 +9,25 @@ const PLATFORM_ICONS: Record<string, string> = {
   bigbasket: "🟢",
 };
 
-// Platform checkout deep links — these open the search page on each platform
-// Users can then select items manually or use the platform's cart
-const PLATFORM_CHECKOUT_BASE: Record<string, string> = {
-  blinkit: "https://blinkit.com/s/?q=",
-  zepto: "https://www.zeptonow.com/search?q=",
-  bigbasket: "https://www.bigbasket.com/custompage/sysgen/?type=pc&slug=",
+// Cart URLs per platform (fallback if not returned by API)
+const PLATFORM_CART_URLS: Record<string, string> = {
+  blinkit: "https://blinkit.com/cart",
+  zepto: "https://www.zepto.com/?cart=open",
+  bigbasket: "https://www.bigbasket.com/basket/?nc=nb",
 };
 
+// Human-readable cart status labels + colours
+const CART_STATUS_CONFIG: Record<string, { label: string; icon: string; cls: string }> = {
+  added:         { label: "Added to cart",   icon: "✅", cls: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+  partial:       { label: "Partially added", icon: "⚠️", cls: "text-amber-600 bg-amber-50 border-amber-200" },
+  failed:        { label: "Cart add failed", icon: "❌", cls: "text-red-500 bg-red-50 border-red-200" },
+  not_connected: { label: "Not connected",   icon: "🔗", cls: "text-slate-500 bg-slate-100 border-slate-200" },
+};
 
 export default function PlatformColumn({
   platform,
   isWinner,
   animationDelay,
-  searchId,
 }: {
   platform: PlatformCart;
   isWinner: boolean;
@@ -31,45 +35,13 @@ export default function PlatformColumn({
   searchId: string;
 }) {
   const theme = useTheme();
-  const { token } = useAuth();
-  const [syncing, setSyncing] = useState(false);
-  const [syncSuccess, setSyncSuccess] = useState(false);
-  // Build a search query from all item names for the platform URL
-  const searchQuery = platform.items
-    .filter((i) => i.available)
-    .map((i) => i.item_name)
-    .join(" ");
-  // Use first available item's product_url for direct checkout if possible
-  const firstAvailableItem = platform.items.find((i) => i.available && i.product_url);
-  const checkoutUrl = firstAvailableItem?.product_url ||
-    ((PLATFORM_CHECKOUT_BASE[platform.platform] || "#") + encodeURIComponent(searchQuery));
 
-  const handleCheckout = () => {
-    window.open(checkoutUrl, "_blank", "noopener,noreferrer");
-  };
+  const cartUrl = platform.cart_url || PLATFORM_CART_URLS[platform.platform] || "#";
+  const cartStatus = platform.cart_status;
+  const statusCfg = cartStatus ? CART_STATUS_CONFIG[cartStatus] : null;
 
-  const handleSyncCart = async () => {
-    if (!token) return alert("Please login first to sync your cart.");
-    setSyncing(true);
-    setSyncSuccess(false);
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/v1/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ platform: platform.platform, search_id: searchId }),
-      });
-      const data = await res.json();
-      if (!res.ok) alert(data.error || "Failed to sync cart");
-      else {
-        setSyncSuccess(true);
-        setTimeout(() => setSyncSuccess(false), 5000);
-      }
-    } catch (err: any) {
-      console.error("Sync error:", err);
-      alert("Network error: " + (err.message || String(err)));
-    } finally {
-      setSyncing(false);
-    }
+  const handleGoToCart = () => {
+    window.open(cartUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -100,6 +72,14 @@ export default function PlatformColumn({
           <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">~{platform.estimated_delivery_min}m</span>
         </div>
       </div>
+
+      {/* Cart Status Badge */}
+      {statusCfg && (
+        <div className={`mx-6 mt-4 flex items-center gap-2 text-xs font-semibold border rounded-xl px-3 py-2 ${statusCfg.cls}`}>
+          <span>{statusCfg.icon}</span>
+          <span>{statusCfg.label}</span>
+        </div>
+      )}
 
       {/* Item List */}
       <div className="px-6 py-4 space-y-2 max-h-[350px] overflow-y-auto custom-scrollbar">
@@ -169,39 +149,23 @@ export default function PlatformColumn({
         </div>
       </div>
 
-      {/* Checkout Button */}
+      {/* Go to Cart Button */}
       <div className="px-6 py-5">
-        {["zepto", "blinkit", "bigbasket"].includes(platform.platform) ? (
-          <button
-            onClick={handleSyncCart}
-            id={`sync-${platform.platform}`}
-            disabled={(!platform.all_items_available && platform.item_total === 0) || syncing}
-            className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${isWinner
+        <button
+          onClick={handleGoToCart}
+          id={`go-to-cart-${platform.platform}`}
+          disabled={!platform.all_items_available && platform.item_total === 0}
+          className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${
+            isWinner
               ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
               : theme === "light"
-                ? "bg-violet-600 hover:bg-violet-500 text-[#ffffff]"
+                ? "bg-violet-600 hover:bg-violet-500 text-white"
                 : "bg-gray-800 hover:bg-gray-700 text-gray-200"
-              } ${(!platform.all_items_available && platform.item_total === 0) || syncing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-            style={!isWinner && theme === "light" ? { background: "#7c3aed", color: "#ffffff" } : undefined}
-          >
-            {syncing ? `Syncing...` : syncSuccess ? "✅ Synced!" : `Sync to ${platform.platform_display}`}
-          </button>
-        ) : (
-          <button
-            onClick={handleCheckout}
-            id={`checkout-${platform.platform}`}
-            disabled={!platform.all_items_available && platform.item_total === 0}
-            className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg ${isWinner
-              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
-              : theme === "light"
-                ? "text-[#ffffff]"
-                : "bg-gray-800 hover:bg-gray-700 text-gray-200"
-              } ${(!platform.all_items_available && platform.item_total === 0) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-            style={!isWinner && theme === "light" ? { background: "#1e293b", color: "#ffffff" } : undefined}
-          >
-            {isWinner ? "Order Now" : `Shop on ${platform.platform_display}`} →
-          </button>
-        )}
+          } ${(!platform.all_items_available && platform.item_total === 0) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          style={!isWinner && theme === "light" ? { background: "#7c3aed", color: "#ffffff" } : undefined}
+        >
+          🛒 Go to {platform.platform_display} Cart →
+        </button>
       </div>
     </div>
   );

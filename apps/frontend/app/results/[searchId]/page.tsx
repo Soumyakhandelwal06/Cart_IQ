@@ -29,6 +29,8 @@ export type PlatformCart = {
   total_payable: number;
   estimated_delivery_min: number;
   all_items_available: boolean;
+  cart_url?: string;       // Direct link to the platform's cart
+  cart_status?: string;    // "added" | "partial" | "failed" | "not_connected"
 };
 
 export type PlatformItem = {
@@ -46,7 +48,7 @@ export type PlatformItem = {
 const STATUS_MESSAGES: Record<string, string> = {
   connecting: "Connecting to search engine...",
   parsing: "🧠 AI is parsing your grocery list...",
-  scraping: "🔍 Checking prices across all platforms...",
+  scraping: "🔍 Fetching live prices & adding items to your connected carts...",
 };
 
 import { useAuth } from "@/context/AuthContext";

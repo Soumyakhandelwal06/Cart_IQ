@@ -3,8 +3,9 @@ Zepto Real-Time Scraper — Uses Playwright to fetch live prices from zeptonow.c
 """
 import asyncio
 import re
-from typing import Optional
+from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright
+from playwright_stealth.stealth import stealth_async
 from scrapers.stealth_helper import apply_stealth
 from scrapers.utils import get_final_quantity, normalize_query_words, parse_pieces_from_name, get_requested_pieces
 
@@ -12,7 +13,7 @@ DEFAULT_LAT = 28.6139
 DEFAULT_LON = 77.2090
 
 
-async def scrape_zepto(items, lat: Optional[float], lon: Optional[float]):
+async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storage_state: Optional[Dict[str, Any]] = None):
     from routes.scrape import PlatformCart, PlatformItemResult
 
     lat = lat or DEFAULT_LAT
@@ -29,12 +30,16 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float]):
             headless=True,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
         )
-        context = await browser.new_context(
+        ctx_kwargs = dict(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800}
         )
+        if storage_state:
+            ctx_kwargs["storage_state"] = storage_state
+            print("[Zepto Scrape] Using authenticated session")
+        context = await browser.new_context(**ctx_kwargs)
+        await stealth_async(context)
         page = await context.new_page()
-        await apply_stealth(page)
 
         # Land on Zepto first to set cookies & location
         try:
