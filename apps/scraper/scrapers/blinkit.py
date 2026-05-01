@@ -21,8 +21,8 @@ async def scrape_blinkit(items, lat: Optional[float], lon: Optional[float], stor
 
     result_items = []
     item_total = 0.0
-    delivery_fee = 29.0
-    handling_fee = 9.0
+    delivery_fee = 30.0
+    handling_fee = 5.0
     surge_fee = 0.0
 
     async with async_playwright() as p:
@@ -103,10 +103,7 @@ async def scrape_blinkit(items, lat: Optional[float], lon: Optional[float], stor
 
         await browser.close()
 
-    # Small cart surcharge
-    if item_total < 199:
-        handling_fee += 15.0
-
+    # Small cart surcharge removed to align closer with actual app screenshots
     all_available = all(i.available for i in result_items)
     total = item_total + delivery_fee + handling_fee + surge_fee
 
