@@ -17,8 +17,12 @@ CLICK_PRODUCT_BTN_JS = r"""
     try {
         // Use only the first line of the name (ignoring weight/price on newlines)
         const baseName = name.split('\n')[0].toLowerCase();
-        // Remove symbols and extract up to 4 significant words to search for
-        const searchWords = baseName.replace(/[()\-]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 4);
+        // Remove symbols, numbers, and weight units. Extract up to 3 core words.
+        const searchWords = baseName
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !/^\d+$/.test(w) && !/^(kg|gm|g|ml|ltr|l|pack|pcs|pieces)$/.test(w))
+            .slice(0, 3);
         if (searchWords.length === 0) return 'no_search_words';
         
         // Find product cards or containers that have ALL search words AND an add button
