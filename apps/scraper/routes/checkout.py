@@ -398,44 +398,58 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
     
     results = []
     for item in items:
-        if not item.product_url or item.product_url == "https://www.bigbasket.com":
+        if not item.product_url:
             results.append({"url": item.product_url, "status": "skipped", "reason": "No valid URL"})
             continue
             
         try:
+            # Bigbasket product_url is either a direct URL or a search URL (/ps/?q=...)
+            # In both cases, navigate there and use the JS clicker to find the right product card
             print(f"[Bigbasket Checkout] Navigating to {item.product_url}")
-            await page.goto(item.product_url, wait_until="domcontentloaded", timeout=25000)
-            await asyncio.sleep(3) # Wait a bit longer for Bigbasket
+            await page.goto(item.product_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)  # Bigbasket is slow to render
             
             success_clicks = 0
             for i in range(item.quantity):
+                clicked = False
+                
+                # Try JS clicker first (uses product name to find the right card)
                 if item.name:
-                    res = await page.evaluate(CLICK_PRODUCT_BTN_JS, item.name)
-                    print(f"  -> JS Click for '{item.name}': {res}")
-                    if res == 'clicked':
-                        success_clicks += 1
-                        await asyncio.sleep(1.5)
-                        continue
-                        
-                # Fallback
-                fallback_selectors = ["text='+'", "button[title='Increase Quantity']", "button:text-is('Add to basket')", "button:text-is('Add')", "text='Add'"]
-                clicked_fallback = False
-                for sel in fallback_selectors:
-                    try:
-                        btn = await page.query_selector(sel)
-                        if btn and await btn.is_visible():
-                            try:
-                                await btn.click(timeout=1000)
-                            except:
-                                await btn.click(force=True)
+                    for attempt in range(3):
+                        res = await page.evaluate(CLICK_PRODUCT_BTN_JS, item.name)
+                        print(f"  -> BB JS click attempt {attempt+1} for '{item.name}': {res}")
+                        if res == 'clicked':
                             success_clicks += 1
-                            clicked_fallback = True
-                            await asyncio.sleep(1)
+                            clicked = True
+                            await asyncio.sleep(2)
                             break
-                    except:
-                        pass
+                        await asyncio.sleep(1.5)
+                
+                if not clicked:
+                    # Fallback: Playwright selectors for Add to Basket button
+                    for sel in [
+                        "button:has-text('Add to Basket')",
+                        "button:has-text('ADD')",
+                        "[data-qa='add_to_cart']",
+                        "button[class*='AddToBasket']",
+                        "button[class*='add-to']",
+                    ]:
+                        try:
+                            btn = await page.query_selector(sel)
+                            if btn and await btn.is_visible():
+                                await btn.click(timeout=3000)
+                                success_clicks += 1
+                                clicked = True
+                                await asyncio.sleep(2)
+                                break
+                        except:
+                            pass
+                
+                if not clicked:
+                    print(f"  -> BB could not click add for '{item.name}' qty {i+1}")
             
             status = "success" if success_clicks == item.quantity else "partial" if success_clicks > 0 else "error"
+            print(f"[Bigbasket Checkout] '{item.name}': {success_clicks}/{item.quantity} → {status}")
             results.append({"url": item.product_url, "status": status, "added_qty": success_clicks})
         except Exception as e:
             print(f"[Bigbasket Checkout] Failed to add item: {str(e)}")
@@ -449,3 +463,4 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
         pass
     await browser.close()
     return results
+

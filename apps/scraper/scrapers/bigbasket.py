@@ -333,7 +333,27 @@ async def _extract_from_page(page, item) -> Optional[dict]:
 
 def _score_and_pick(products, query_words, item):
     if not products: return None
-    
+
+    # ── Reject processed/snack products when looking for fresh produce ─────────
+    # e.g. avoid matching "Fun Flips Potato Chips" when searching for "potato"
+    PRODUCE_TERMS = {"tomato", "potato", "onion", "garlic", "ginger", "lemon", "lime",
+                     "carrot", "cabbage", "spinach", "coriander", "cucumber", "brinjal",
+                     "capsicum", "peas", "beans", "radish", "beetroot", "cauliflower"}
+    PROCESSED_TERMS = {"chips", "crisps", "wafers", "biscuit", "cookie", "namkeen",
+                       "snack", "fries", "processed", "instant", "nugget", "masala mix",
+                       "pickle", "sauce", "ketchup", "puree", "paste", "powder", "juice"}
+    is_produce_query = any(qw in PRODUCE_TERMS for qw in query_words)
+    if is_produce_query and not item.brand:
+        filtered = []
+        for p in products:
+            name_lower = p["name"].lower()
+            if any(pt in name_lower for pt in PROCESSED_TERMS):
+                print(f"[Bigbasket] Skipping processed product: {p['name']}")
+                continue
+            filtered.append(p)
+        if filtered:  # Only apply filter if it doesn't wipe everything out
+            products = filtered
+
     # Brand matching: if a brand is requested, prefer products that contain it
     if item.brand:
         brand_lower = item.brand.lower()
@@ -360,10 +380,9 @@ def _score_and_pick(products, query_words, item):
         
         piece_bonus = 0
         if req_pieces > 0:
-            # Does this product exactly have the required pieces?
             p_pieces = parse_pieces_from_name(p["name"])
             if p_pieces == req_pieces:
-                piece_bonus = 5.0 # Huge bonus for exact piece match (e.g., 6 pcs for 6 requested)
+                piece_bonus = 5.0
                 
         return match_count + starts_with_bonus + piece_bonus
         
@@ -373,7 +392,6 @@ def _score_and_pick(products, query_words, item):
         return None
     
     # If no brand is specified, pick the cheapest among the top-scoring products
-    # (same relevance = same item, just different brands → pick min price)
     if not item.brand:
         top_score = score(max(valid_products, key=score))
         top_products = [p for p in valid_products if score(p) == top_score]
