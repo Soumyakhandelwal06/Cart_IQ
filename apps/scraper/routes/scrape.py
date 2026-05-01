@@ -163,16 +163,46 @@ async def scrape_all(request: ScrapeRequest, req: Request):
                 platform.cart_status = "failed"
                 continue
 
+            # Reconcile items: update comparison table to match exactly what was added to the cart
+            successful_urls = {r.get("url"): r.get("added_qty", 0) for r in results if r.get("status") in ["success", "partial"]}
+            
+            final_items = []
+            new_item_total = 0.0
+            for item in platform.items:
+                # If we successfully added some quantity of this product URL
+                if item.product_url in successful_urls:
+                    added_qty = successful_urls[item.product_url]
+                    if added_qty > 0:
+                        item.quantity = added_qty
+                        item.subtotal = round(item.unit_price * added_qty, 2)
+                        new_item_total += item.subtotal
+                        final_items.append(item)
+                else:
+                    # Item failed to add
+                    item.available = False
+                    item.quantity = 0
+                    item.subtotal = 0.0
+                    final_items.append(item)
+
+            platform.items = final_items
+            platform.item_total = round(new_item_total, 2)
+            
+            if platform.platform == "bigbasket" and platform.item_total > 500:
+                platform.delivery_fee = 0.0
+                
+            platform.total_payable = round(platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee, 2)
+            platform.all_items_available = all(i.available for i in final_items)
+
             # Determine cart_status from results
             statuses = [r.get("status", "error") for r in results]
-            if all(s == "success" for s in statuses):
+            if all(s == "success" for s in statuses) and len(statuses) > 0:
                 platform.cart_status = "added"
             elif any(s in ("success", "partial") for s in statuses):
                 platform.cart_status = "partial"
             else:
                 platform.cart_status = "failed"
 
-            print(f"[Scraper] {platform.platform} cart → {platform.cart_status}")
+            print(f"[Scraper] {platform.platform} cart → {platform.cart_status} (Total: ₹{platform.total_payable})")
 
         except Exception as e:
             print(f"[Scraper] Auto-checkout failed for {platform.platform}: {e}")
