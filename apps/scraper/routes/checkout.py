@@ -107,7 +107,7 @@ async def process_checkout(platform: str, request: CheckoutRequest, req: Request
 
 async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=False,  # Visible browser for user observation
+        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
         args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
     )
     
@@ -313,18 +313,18 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             print(f"[Zepto Checkout] Failed to add item: {item.product_url} -> {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Navigate to cart and leave browser OPEN for user to review
+    # Navigate to cart then close — cart is saved server-side, user clicks 'Go to Cart'
     try:
         await page.goto("https://www.zepto.com/?cart=open", wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
     except:
         pass
-    # NOTE: browser is intentionally NOT closed — user can review cart in the visible window
+    await browser.close()
     return results
 
 async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=False,
+        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
         args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
     )
     context = await browser.new_context(
@@ -372,14 +372,18 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             print(f"[Blinkit Checkout] Failed to add item: {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Open cart page and leave browser open
-    await page.goto("https://blinkit.com/cart")
-
+    # Navigate to cart then close — cart is saved server-side
+    try:
+        await page.goto("https://blinkit.com/cart")
+        await asyncio.sleep(1)
+    except:
+        pass
+    await browser.close()
     return results
 
 async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=False,
+        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
         args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
     )
     context = await browser.new_context(
@@ -437,7 +441,11 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             print(f"[Bigbasket Checkout] Failed to add item: {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Open cart page and leave browser open
-    await page.goto("https://www.bigbasket.com/basket/?nc=nb")
-
+    # Navigate to cart then close — cart is saved server-side
+    try:
+        await page.goto("https://www.bigbasket.com/basket/?nc=nb")
+        await asyncio.sleep(1)
+    except:
+        pass
+    await browser.close()
     return results
