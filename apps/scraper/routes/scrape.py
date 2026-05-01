@@ -187,10 +187,22 @@ async def scrape_all(request: ScrapeRequest, req: Request):
             platform.items = final_items
             platform.item_total = round(new_item_total, 2)
             
-            if platform.platform == "bigbasket" and platform.item_total > 500:
-                platform.delivery_fee = 0.0
+            # Extract cart summary if available (100% accurate live bill)
+            summary_obj = next((r["totals"] for r in results if r.get("type") == "cart_summary"), None)
+            
+            if summary_obj:
+                print(f"[Scraper] Applying actual cart totals for {platform.platform}: {summary_obj}")
+                platform.item_total = summary_obj.get("item_total", platform.item_total) or platform.item_total
+                platform.delivery_fee = summary_obj.get("delivery_fee", platform.delivery_fee) or platform.delivery_fee
+                platform.handling_fee = summary_obj.get("handling_fee", platform.handling_fee) or platform.handling_fee
+                platform.surge_fee = summary_obj.get("surge_fee", platform.surge_fee) or platform.surge_fee
+                platform.total_payable = summary_obj.get("total_payable", platform.total_payable) or (platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee)
+            else:
+                # Fallback to logic if parsing failed
+                if platform.platform == "bigbasket" and platform.item_total > 500:
+                    platform.delivery_fee = 0.0
+                platform.total_payable = round(platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee, 2)
                 
-            platform.total_payable = round(platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee, 2)
             platform.all_items_available = all(i.available for i in final_items)
 
             # Determine cart_status from results

@@ -12,6 +12,34 @@ class CheckoutItem(BaseModel):
     quantity: int
     name: Optional[str] = None
 
+import re
+def parse_bill(text: str) -> dict:
+    totals = {}
+    if not text: return totals
+    lines = [line.strip().lower() for line in text.split('\n') if line.strip()]
+    
+    def get_price(idx):
+        if idx + 1 < len(lines):
+            val = lines[idx+1]
+            if 'free' in val or 'strike' in val: return 0.0
+            match = re.search(r'(\d+(\.\d+)?)', val)
+            if match: return float(match.group(1))
+        return None
+        
+    for i, line in enumerate(lines):
+        if 'item total' in line or 'items total' in line or 'mrp total' in line or 'basket value' in line:
+            if 'item_total' not in totals: totals['item_total'] = get_price(i)
+        elif 'delivery charge' in line or 'delivery fee' in line or ('delivery' in line and len(line) < 15):
+            if 'delivery_fee' not in totals: totals['delivery_fee'] = get_price(i)
+        elif 'handling charge' in line or 'handling fee' in line or 'platform fee' in line:
+            if 'handling_fee' not in totals: totals['handling_fee'] = get_price(i)
+        elif 'surge' in line or 'small cart' in line or 'rain' in line:
+            if 'surge_fee' not in totals: totals['surge_fee'] = get_price(i)
+        elif line in ['to pay', 'grand total', 'total amount', 'total payable', 'amount payable']:
+            if 'total_payable' not in totals: totals['total_payable'] = get_price(i)
+            
+    return totals
+
 CLICK_PRODUCT_BTN_JS = r"""
 (name) => {
     try {
@@ -321,8 +349,13 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
     try:
         await page.goto("https://www.zepto.com/?cart=open", wait_until="domcontentloaded")
         await asyncio.sleep(2)
-    except:
-        pass
+        text = await page.evaluate("document.body.innerText")
+        totals = parse_bill(text)
+        if totals:
+            results.append({"type": "cart_summary", "totals": totals})
+            print(f"[Zepto Checkout] Cart Bill Extracted: {totals}")
+    except Exception as e:
+        print(f"[Zepto Checkout] Failed to extract bill: {e}")
     await browser.close()
     return results
 
@@ -378,10 +411,15 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
 
     # Navigate to cart then close — cart is saved server-side
     try:
-        await page.goto("https://blinkit.com/cart")
-        await asyncio.sleep(1)
-    except:
-        pass
+        await page.goto("https://blinkit.com/cart", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+        text = await page.evaluate("document.body.innerText")
+        totals = parse_bill(text)
+        if totals:
+            results.append({"type": "cart_summary", "totals": totals})
+            print(f"[Blinkit Checkout] Cart Bill Extracted: {totals}")
+    except Exception as e:
+        print(f"[Blinkit Checkout] Failed to extract bill: {e}")
     await browser.close()
     return results
 
@@ -469,12 +507,17 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             print(f"[Bigbasket Checkout] Failed to add item: {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Navigate to cart then close — cart is saved server-side
+    # Navigate to cart to extract exact totals
     try:
-        await page.goto("https://www.bigbasket.com/basket/?nc=nb")
-        await asyncio.sleep(1)
-    except:
-        pass
+        await page.goto("https://www.bigbasket.com/basket/?nc=nb", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+        text = await page.evaluate("document.body.innerText")
+        totals = parse_bill(text)
+        if totals:
+            results.append({"type": "cart_summary", "totals": totals})
+            print(f"[Bigbasket Checkout] Cart Bill Extracted: {totals}")
+    except Exception as e:
+        print(f"[Bigbasket Checkout] Failed to extract bill: {e}")
     await browser.close()
     return results
 
