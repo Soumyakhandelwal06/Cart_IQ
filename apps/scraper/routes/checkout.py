@@ -732,76 +732,113 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             await asyncio.sleep(3)  # Bigbasket is slow to render
             
             success_clicks = 0
-            for i in range(item.quantity):
-                clicked = False
-                
-                if item.name:
-                    base_name = item.name.split('\n')[0].strip()
-                    
-                    for attempt in range(4):
-                        try:
-                            # Find the correct product card and get the Add button's screen coordinates
-                            btn_info = await page.evaluate("""
-                            (name) => {
-                                const baseName = name.split('\\n')[0].toLowerCase();
-                                const words = baseName.replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
-                                    .filter(w => w.length > 2 && !/^(\\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
-                                    .slice(0, 2);
-                                if (!words.length) return null;
-                                
-                                // Find all product cards that contain our words
-                                const cards = Array.from(document.querySelectorAll('div, li, article'))
-                                    .filter(e => {
-                                        const txt = (e.innerText || '').toLowerCase();
-                                        if (!words.every(w => txt.includes(w))) return false;
-                                        const rect = e.getBoundingClientRect();
-                                        // Must be a reasonably sized element (not the whole page)
-                                        return rect.width > 50 && rect.width < 700 && rect.height > 50 && rect.height < 700;
-                                    });
-                                if (!cards.length) return {found: false, reason: 'no_card'};
-                                
-                                // Sort by smallest area to get most specific card
-                                cards.sort((a, b) => {
-                                    const ra = a.getBoundingClientRect();
-                                    const rb = b.getBoundingClientRect();
-                                    return (ra.width * ra.height) - (rb.width * rb.height);
+            # ─── PHASE 1: Find the correct product card and click ADD once ───────────
+            add_coords = None
+            base_name = item.name.split('\n')[0].strip() if item.name else "item"
+            
+            for attempt in range(4):
+                try:
+                    add_coords = await page.evaluate("""
+                    (name) => {
+                        const words = name.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
+                            .filter(w => w.length > 2 && !/^(\\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
+                            .slice(0, 2);
+                        
+                        const cards = Array.from(document.querySelectorAll('div, li, article'))
+                            .filter(e => {
+                                const txt = (e.innerText || '').toLowerCase();
+                                if (words.length && !words.every(w => txt.includes(w))) return false;
+                                const r = e.getBoundingClientRect();
+                                return r.width > 50 && r.height > 50;
+                            });
+                        if (!cards.length) return null;
+                        
+                        cards.sort((a, b) => (a.offsetWidth * a.offsetHeight) - (b.offsetWidth * b.offsetHeight));
+                        
+                        for (const card of cards.slice(0, 5)) {
+                            const btn = Array.from(card.querySelectorAll('button'))
+                                .find(b => {
+                                    const t = (b.innerText || '').trim().toLowerCase();
+                                    return t === 'add' || t === 'add to basket';
                                 });
+                            if (btn) {
+                                btn.scrollIntoView({block: 'center', behavior: 'instant'});
+                                const r = btn.getBoundingClientRect();
+                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                            }
+                        }
+                        return null;
+                    }
+                    """, base_name)
+                    
+                    if add_coords:
+                        await asyncio.sleep(0.4)
+                        await page.mouse.click(add_coords['x'], add_coords['y'])
+                        success_clicks += 1
+                        print(f"  -> BB ADD click for '{base_name}': ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
+                        await asyncio.sleep(3) # Wait for stepper to appear
+                        break
+                    else:
+                        print(f"  -> BB Phase1 attempt {attempt+1}: not found for '{base_name}'")
+                        await asyncio.sleep(1.5)
+                except Exception as ce:
+                    print(f"  -> BB Phase1 attempt {attempt+1} error: {ce}")
+                    await asyncio.sleep(1)
+
+            # ─── PHASE 2: Click [+] stepper for extra quantities ───────────────────
+            if add_coords and item.quantity > 1:
+                for extra in range(item.quantity - 1):
+                    plus_clicked = False
+                    for attempt in range(3):
+                        try:
+                            plus_coords = await page.evaluate("""
+                            (name) => {
+                                const words = name.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
+                                    .filter(w => w.length > 2).slice(0, 2);
                                 
-                                for (const card of cards.slice(0, 5)) {
-                                    const addBtn = Array.from(card.querySelectorAll('button'))
-                                        .find(b => (b.innerText || '').trim().toLowerCase() === 'add');
-                                    if (addBtn) {
-                                        addBtn.scrollIntoView({block: 'center', behavior: 'instant'});
-                                        const r = addBtn.getBoundingClientRect();
-                                        if (r.width === 0) return {found: false, reason: 'btn_zero_size'};
-                                        return {found: true, x: r.x + r.width/2, y: r.y + r.height/2};
+                                const plusBtns = Array.from(document.querySelectorAll('button, div'))
+                                    .filter(e => {
+                                        const t = (e.innerText || '').trim();
+                                        const aria = (e.getAttribute('aria-label') || '').toLowerCase();
+                                        return t === '+' || aria.includes('increase') || aria.includes('add');
+                                    }).filter(e => {
+                                        const r = e.getBoundingClientRect();
+                                        return r.width > 0 && r.height > 0;
+                                    });
+                                
+                                if (!plusBtns.length) return null;
+                                
+                                for (const btn of plusBtns) {
+                                    let p = btn.parentElement;
+                                    for (let d = 0; d < 12 && p; d++) {
+                                        const txt = (p.innerText || '').toLowerCase();
+                                        if (words.every(w => txt.includes(w))) {
+                                            btn.scrollIntoView({block: 'center', behavior: 'instant'});
+                                            const r = btn.getBoundingClientRect();
+                                            return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                        }
+                                        p = p.parentElement;
                                     }
                                 }
-                                return {found: false, reason: 'no_add_btn_in_card'};
+                                return null;
                             }
                             """, base_name)
                             
-                            if btn_info and btn_info.get('found'):
-                                await asyncio.sleep(0.3)  # Let scroll settle
-                                await page.mouse.click(btn_info['x'], btn_info['y'])
+                            if plus_coords:
+                                await asyncio.sleep(0.3)
+                                await page.mouse.click(plus_coords['x'], plus_coords['y'])
                                 success_clicks += 1
-                                clicked = True
-                                print(f"  -> BB click attempt {attempt+1} for '{base_name}': clicked at ({btn_info['x']:.0f},{btn_info['y']:.0f}) ✅")
-                                await asyncio.sleep(2.5)
+                                plus_clicked = True
+                                print(f"  -> BB + click #{extra+2} for '{base_name}': ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
+                                await asyncio.sleep(1.5)
                                 break
                             else:
-                                reason = btn_info.get('reason', 'unknown') if btn_info else 'null_result'
-                                print(f"  -> BB attempt {attempt+1}: not found ({reason}) for '{base_name}'")
-                                if attempt < 3:
-                                    await page.evaluate("window.scrollTo(0, 0)")  # Scroll back to top and retry
-                                    await asyncio.sleep(1)
-                        except Exception as ce:
-                            print(f"  -> BB attempt {attempt+1} error: {ce}")
-                        await asyncio.sleep(1.5)
-                
-                if not clicked:
-                    print(f"  -> BB could not click add for '{item.name}' qty {i+1}")
-            
+                                print(f"  -> BB Phase2 attempt {attempt+1}: + not found")
+                                await asyncio.sleep(1)
+                        except: await asyncio.sleep(0.5)
+                    if not plus_clicked:
+                        print(f"  -> BB could not click + for unit {extra+2}")
+
             status = "success" if success_clicks == item.quantity else "partial" if success_clicks > 0 else "error"
             print(f"[Bigbasket Checkout] '{item.name}': {success_clicks}/{item.quantity} → {status}")
             results.append({"url": item.product_url, "status": status, "added_qty": success_clicks})
