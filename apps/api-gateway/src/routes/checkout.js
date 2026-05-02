@@ -70,10 +70,31 @@ router.post('/', authMiddleware, async (req, res) => {
       items: itemsToAdd
     }, { timeout: 300000 }); // 5 minutes timeout
 
+    const scraperResults = scraperRes.data.results;
+
+    // For Blinkit: cart is localStorage-only, so save the updated storageState back to MongoDB
+    // so the user's session in their own browser gets the cart when they open blinkit.com
+    if (platform === 'blinkit') {
+      const updatedStateResult = scraperResults.find(r => r.type === 'updated_storage_state');
+      if (updatedStateResult && updatedStateResult.state) {
+        try {
+          user.platformAccounts[platform].storageState = updatedStateResult.state;
+          user.markModified('platformAccounts');
+          await user.save();
+          console.log(`[Checkout] Saved updated Blinkit storageState (with cart) back to MongoDB ✅`);
+        } catch (saveErr) {
+          console.error('[Checkout] Failed to save updated Blinkit storageState:', saveErr.message);
+        }
+      }
+    }
+
+    // Filter out internal result types before returning to client
+    const clientResults = scraperResults.filter(r => r.type !== 'updated_storage_state');
+
     return res.json({
       success: true,
       message: `Successfully synced ${itemsToAdd.length} items to your ${platform} cart!`,
-      details: scraperRes.data.results
+      details: clientResults
     });
 
   } catch (err) {

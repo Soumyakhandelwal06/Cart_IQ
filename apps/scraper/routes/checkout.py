@@ -564,8 +564,19 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
         ''')
         print(f"[Blinkit Checkout] localStorage cart: {cart_info}")
         if cart_info and cart_info.get('count', 0) > 0:
-            results.append({"type": "cart_summary", "totals": {"item_total": cart_info.get('total', 0), "item_count": cart_info['count']}})
+            # Extract full cart data to save back to user's session in MongoDB
+            full_cart = await page.evaluate("() => localStorage.getItem('cart')")
+            results.append({
+                "type": "cart_summary",
+                "totals": {"item_total": cart_info.get('total', 0), "item_count": cart_info['count']},
+                "cart_data": full_cart  # Full cart JSON for session update
+            })
             print(f"[Blinkit Checkout] Cart verified via localStorage: {cart_info['count']} items ✅")
+            
+            # Save updated storageState back so MongoDB gets the new cart
+            updated_state = await context.storage_state()
+            results.append({"type": "updated_storage_state", "state": updated_state})
+            print("[Blinkit Checkout] Updated storageState captured for saving back to MongoDB ✅")
         else:
             # Fallback: go to cart page and parse text
             try:
@@ -578,7 +589,6 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
                 results.append({"type": "cart_summary", "totals": totals})
                 print(f"[Blinkit Checkout] Cart verified via page text: {totals} ✅")
             else:
-                # Final fallback: count stepper '+' buttons
                 steppers = await page.evaluate("() => document.querySelectorAll('button[aria-label*=\"Increase\"], button[aria-label*=\"increase\"]').length")
                 if steppers > 0:
                     results.append({"type": "cart_summary", "totals": {"item_count": steppers}})
