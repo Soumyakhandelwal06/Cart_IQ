@@ -375,7 +375,12 @@ async def trigger_otp(platform: str, request: AuthRequest, background_tasks: Bac
                     
                     await asyncio.sleep(1)
                     
-                    # Click the OTP trigger button
+                    # Try pressing Enter first, it's very robust and native
+                    try: await loc.press("Enter")
+                    except: pass
+                    await asyncio.sleep(1)
+                    
+                    # Click the OTP trigger button as fallback
                     for cont_sel in [
                         "button[type='submit']",
                         "button:has-text('Continue')",
@@ -384,7 +389,8 @@ async def trigger_otp(platform: str, request: AuthRequest, background_tasks: Bac
                         "button:has-text('Send OTP')",
                     ]:
                         try:
-                            cont_loc = target_page.locator(cont_sel).locator("visible=true").first
+                            # Fixed invalid locator syntax
+                            cont_loc = target_page.locator(f"{cont_sel}:visible").first
                             await cont_loc.wait_for(state="visible", timeout=3000)
                             
                             # 1. Native slow human coordinate click
