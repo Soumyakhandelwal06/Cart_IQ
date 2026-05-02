@@ -477,25 +477,7 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
                             break
                         await asyncio.sleep(1.5)
                 
-                if not clicked:
-                    # Fallback: Playwright selectors for Add to Basket button
-                    for sel in [
-                        "button:has-text('Add to Basket')",
-                        "button:has-text('ADD')",
-                        "[data-qa='add_to_cart']",
-                        "button[class*='AddToBasket']",
-                        "button[class*='add-to']",
-                    ]:
-                        try:
-                            btn = await page.query_selector(sel)
-                            if btn and await btn.is_visible():
-                                await btn.click(timeout=3000)
-                                success_clicks += 1
-                                clicked = True
-                                await asyncio.sleep(2)
-                                break
-                        except:
-                            pass
+
                 
                 if not clicked:
                     print(f"  -> BB could not click add for '{item.name}' qty {i+1}")

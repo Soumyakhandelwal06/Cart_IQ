@@ -286,8 +286,16 @@ async def _extract_from_page(page, item) -> Optional[dict]:
                         }
                     }
                     if (!foundImage) {
-                        const img = current.querySelector('img');
-                        if (img && img.src && !img.src.includes('data:image')) foundImage = img.src;
+                        const imgs = Array.from(current.querySelectorAll('img')).filter(img => img.src && !img.src.includes('data:image'));
+                        if (imgs.length > 0) {
+                            // Find the best matching image for this product
+                            const bestImg = imgs.find(img => {
+                                const alt = (img.alt || "").toLowerCase();
+                                const src = img.src.toLowerCase();
+                                return queryWords.some(w => alt.includes(w) || src.includes(w));
+                            });
+                            foundImage = bestImg ? bestImg.src : imgs[0].src;
+                        }
                     }
                     if (!foundUrl) {
                         const a = current.closest('a');

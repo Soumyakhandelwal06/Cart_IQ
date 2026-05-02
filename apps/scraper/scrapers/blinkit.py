@@ -227,9 +227,16 @@ async def _extract_first_product_blinkit(page, item) -> Optional[dict]:
                     }
                     // 3. Find image (Blinkit uses grofers/blinkit CDNs)
                     let foundImage = null;
-                    const nameSnippet = foundName.split(' ')[0];
-                    const img = current.querySelector(`img[src*="blinkit"], img[src*="grofers"], img[alt*="${nameSnippet}"]`);
-                    if (img) foundImage = img.src;
+                    const imgs = Array.from(current.querySelectorAll('img[src*="blinkit"], img[src*="grofers"]')).filter(img => img.src && !img.src.includes('data:image'));
+                    if (imgs.length > 0) {
+                        const nameSnippet = foundName.split(' ')[0].toLowerCase();
+                        const bestImg = imgs.find(img => {
+                            const alt = (img.alt || "").toLowerCase();
+                            const src = img.src.toLowerCase();
+                            return alt.includes(nameSnippet) || src.includes(nameSnippet);
+                        });
+                        foundImage = bestImg ? bestImg.src : imgs[0].src;
+                    }
 
                     results.push({ name: foundName, price: price, url: url, image_url: foundImage });
                 }
