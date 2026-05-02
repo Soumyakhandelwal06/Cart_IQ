@@ -459,83 +459,131 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             await asyncio.sleep(3)  # Extra wait for React event listeners to attach
             
             success_clicks = 0
-            for i in range(item.quantity):
-                clicked = False
-                
-                for attempt in range(4):
-                    try:
-                        # Find the first visible ADD element (any tag — Blinkit uses styled divs/spans)
-                        add_coords = await page.evaluate("""
-                        (name) => {
-                            // Find any element whose text is exactly "ADD"
-                            const addEls = Array.from(document.querySelectorAll('*')).filter(e => {
-                                // Skip elements with children (we want the leaf text node)
-                                const directText = Array.from(e.childNodes)
-                                    .filter(n => n.nodeType === 3)
-                                    .map(n => n.textContent.trim())
-                                    .join('');
-                                return directText === 'ADD' || (e.childNodes.length === 0 && (e.textContent||'').trim() === 'ADD');
-                            });
+            
+            # ─── PHASE 1: Find the correct product card and click ADD once ───────────────
+            add_coords = None
+            for attempt in range(4):
+                try:
+                    add_coords = await page.evaluate("""
+                    (name) => {
+                        // Find any visible element whose direct text is exactly "ADD"
+                        const addEls = Array.from(document.querySelectorAll('*')).filter(e => {
+                            const directText = Array.from(e.childNodes)
+                                .filter(n => n.nodeType === 3)
+                                .map(n => n.textContent.trim()).join('');
+                            return directText === 'ADD' || (e.childNodes.length === 0 && (e.textContent||'').trim() === 'ADD');
+                        }).filter(e => {
+                            const r = e.getBoundingClientRect();
+                            return r.width > 0 && r.height > 0;
+                        });
+                        
+                        if (!addEls.length) return null;
+                        
+                        // Match to correct product card using name keywords
+                        if (name) {
+                            const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+                                .filter(w => w.length > 3).slice(0, 2);
                             
-                            // Filter to only visible ones
-                            const visible = addEls.filter(e => {
-                                const r = e.getBoundingClientRect();
-                                return r.width > 0 && r.height > 0;
-                            });
-                            
-                            if (!visible.length) return null;
-                            
-                            // If we have a name, try to find the one closest to the product
-                            // Otherwise just take the first one
-                            if (name) {
+                            for (const addEl of addEls) {
+                                let parent = addEl.parentElement;
+                                for (let depth = 0; depth < 15 && parent; depth++) {
+                                    const txt = (parent.innerText || '').toLowerCase();
+                                    if (words.length && words.every(w => txt.includes(w))) {
+                                        addEl.scrollIntoView({block: 'center', behavior: 'instant'});
+                                        const r = addEl.getBoundingClientRect();
+                                        return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'name_match'};
+                                    }
+                                    parent = parent.parentElement;
+                                }
+                            }
+                        }
+                        
+                        // Fallback: first visible ADD
+                        addEls[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                        const r = addEls[0].getBoundingClientRect();
+                        return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'fallback'};
+                    }
+                    """, clean_name)
+                    
+                    if add_coords:
+                        await asyncio.sleep(0.4)
+                        await page.mouse.click(add_coords['x'], add_coords['y'])
+                        success_clicks += 1
+                        print(f"  -> Blinkit ADD click for '{clean_name}' [{add_coords['found']}]: ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
+                        await asyncio.sleep(2)  # Wait for ADD to morph into stepper
+                        break
+                    else:
+                        print(f"  -> Blinkit Phase1 attempt {attempt+1}: no ADD found for '{clean_name}'")
+                        await asyncio.sleep(1.5)
+                except Exception as ce:
+                    print(f"  -> Blinkit Phase1 attempt {attempt+1} error: {ce}")
+                    await asyncio.sleep(1)
+            
+            # ─── PHASE 2: Click the + stepper N-1 more times in the SAME card ──────────
+            if add_coords and item.quantity > 1:
+                for extra in range(item.quantity - 1):
+                    plus_clicked = False
+                    for attempt in range(3):
+                        try:
+                            plus_coords = await page.evaluate("""
+                            (name) => {
+                                // Find stepper '+' button inside the product card matching our name
                                 const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
                                     .filter(w => w.length > 3).slice(0, 2);
                                 
-                                // Find product card for this item
-                                for (const addEl of visible) {
-                                    let parent = addEl.parentElement;
-                                    let found = false;
-                                    for (let depth = 0; depth < 15 && parent; depth++) {
-                                        const txt = (parent.innerText || '').toLowerCase();
-                                        if (words.length && words.every(w => txt.includes(w))) {
-                                            found = true;
-                                            break;
+                                // Find all '+' elements (stepper increment)
+                                const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
+                                    const directText = Array.from(e.childNodes)
+                                        .filter(n => n.nodeType === 3)
+                                        .map(n => n.textContent.trim()).join('');
+                                    return directText === '+' || e.getAttribute('aria-label') === 'Increase quantity';
+                                }).filter(e => {
+                                    const r = e.getBoundingClientRect();
+                                    return r.width > 0 && r.height > 0;
+                                });
+                                
+                                if (!plusEls.length) return null;
+                                
+                                // Find the + inside the correct product card
+                                if (words.length) {
+                                    for (const plusEl of plusEls) {
+                                        let parent = plusEl.parentElement;
+                                        for (let depth = 0; depth < 15 && parent; depth++) {
+                                            const txt = (parent.innerText || '').toLowerCase();
+                                            if (words.every(w => txt.includes(w))) {
+                                                plusEl.scrollIntoView({block: 'center', behavior: 'instant'});
+                                                const r = plusEl.getBoundingClientRect();
+                                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                            }
+                                            parent = parent.parentElement;
                                         }
-                                        parent = parent.parentElement;
-                                    }
-                                    if (found) {
-                                        addEl.scrollIntoView({block: 'center', behavior: 'instant'});
-                                        const r = addEl.getBoundingClientRect();
-                                        return {x: r.x + r.width/2, y: r.y + r.height/2};
                                     }
                                 }
+                                
+                                // Fallback: first + button
+                                plusEls[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                                const r = plusEls[0].getBoundingClientRect();
+                                return {x: r.x + r.width/2, y: r.y + r.height/2};
                             }
+                            """, clean_name)
                             
-                            // Fallback: click first visible ADD
-                            visible[0].scrollIntoView({block: 'center', behavior: 'instant'});
-                            const r = visible[0].getBoundingClientRect();
-                            return {x: r.x + r.width/2, y: r.y + r.height/2};
-                        }
-                        """, clean_name)
-                        
-                        if add_coords:
-                            await asyncio.sleep(0.4)  # Let scroll settle
-                            await page.mouse.click(add_coords['x'], add_coords['y'])
-                            success_clicks += 1
-                            clicked = True
-                            print(f"  -> Blinkit mouse.click for '{clean_name}': clicked at ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
-                            await asyncio.sleep(2)
-                            break
-                        else:
-                            print(f"  -> Blinkit attempt {attempt+1}: no ADD element found for '{clean_name}'")
-                            if attempt < 3:
-                                await asyncio.sleep(1.5)
-                    except Exception as ce:
-                        print(f"  -> Blinkit attempt {attempt+1} error: {ce}")
-                        await asyncio.sleep(1)
-                
-                if not clicked:
-                    print(f"  -> Blinkit could not click ADD for '{clean_name}' qty {i+1}")
+                            if plus_coords:
+                                await asyncio.sleep(0.3)
+                                await page.mouse.click(plus_coords['x'], plus_coords['y'])
+                                success_clicks += 1
+                                plus_clicked = True
+                                print(f"  -> Blinkit + click #{extra+2} for '{clean_name}': ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
+                                await asyncio.sleep(1)
+                                break
+                            else:
+                                print(f"  -> Blinkit Phase2 attempt {attempt+1}: no + stepper found for '{clean_name}'")
+                                await asyncio.sleep(1)
+                        except Exception as ce:
+                            print(f"  -> Blinkit Phase2 attempt {attempt+1} error: {ce}")
+                            await asyncio.sleep(0.5)
+                    
+                    if not plus_clicked:
+                        print(f"  -> Blinkit could not click + for '{clean_name}' unit {extra+2}")
             
             status = "success" if success_clicks == item.quantity else "partial" if success_clicks > 0 else "error"
             results.append({"url": item.product_url, "status": status, "added_qty": success_clicks})
