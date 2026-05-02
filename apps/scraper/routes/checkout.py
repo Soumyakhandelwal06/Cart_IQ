@@ -145,8 +145,13 @@ async def process_checkout(platform: str, request: CheckoutRequest, req: Request
 
 async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
-        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        headless=False,  # Visible browser — Zepto detects headless and marks sessions as guest
+        args=[
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--window-position=0,0",
+        ]
     )
     
     # Load user's saved session
@@ -166,14 +171,24 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
         print(f"[Zepto Checkout] Homepage load warning (ignoring): {e}")
     await asyncio.sleep(3)
     
-    # Debug: check if logged in
+    # Debug: check if logged in — check multiple auth signals (localStorage + cookies)
+    await asyncio.sleep(2)  # Extra wait for visible browser to hydrate localStorage from cookies
     login_state = await page.evaluate(r'''
         () => {
             try {
+                // Check 1: localStorage.user
                 const u = localStorage.getItem("user");
                 const parsed = u ? JSON.parse(u) : null;
-                // If the user object is valid and has a name or phone, we're fully logged in
-                return parsed && (parsed.phone || parsed.name) ? "logged_in:" + (parsed.phone || parsed.name) : "guest";
+                if (parsed && (parsed.phone || parsed.name)) return "logged_in:" + (parsed.phone || parsed.name);
+                
+                // Check 2: localStorage.auth or authKey
+                const auth = localStorage.getItem("auth") || localStorage.getItem("authKey") || localStorage.getItem("authKeyITS");
+                if (auth && auth.length > 10) return "logged_in:auth_token";
+                
+                // Check 3: localStorage.user but with customerId
+                if (parsed && (parsed.customerId || parsed.id || parsed.userId)) return "logged_in:customer";
+                
+                return "guest";
             } catch(e) { return "error:" + e.message; }
         }
     ''')
@@ -244,41 +259,50 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                 except:
                     pass
 
-            # Click the initial ADD button (the big button before the stepper appears)
+            # Click the initial ADD button using Playwright native click (React requires real pointer events)
             added = False
-            add_result = await page.evaluate(r'''
-                () => {
-                    // First look for the big ADD / Add To Cart button (NOT the + increment)
-                    const all = Array.from(document.querySelectorAll("button, div[role='button']"));
-                    const addBtn = all.find(b => {
-                        const t = (b.innerText || "").trim().toLowerCase();
-                        return t === "add" || t === "add to cart" || t === "add to basket";
-                    });
-                    if (addBtn) { addBtn.click(); return "clicked_add:" + addBtn.innerText.trim(); }
-                    // If stepper already visible (+ button exists), item already added
-                    const plus = document.querySelector("button[aria-label='Increase quantity by one']");
-                    if (plus) return "already_in_cart";
-                    return "not_found";
-                }
-            ''')
-            if add_result and (add_result.startswith("clicked_add") or add_result == "already_in_cart"):
-                print(f"[Zepto Checkout] Initial add result: {add_result}")
-                await asyncio.sleep(3)  # Wait for the button to morph into [- qty +]
-                added = True
-            else:
-                print(f"[Zepto Checkout] JS click failed ({add_result}), trying Playwright selectors...")
-                for sel in ["button[aria-label='Increase quantity by one']", "text='Add To Cart'", "text='Add to Cart'", "button:has-text('Add To Cart')"]:
-                    try:
-                        btn = await page.wait_for_selector(sel, state="visible", timeout=4000)
-                        if btn:
-                            await btn.scroll_into_view_if_needed()
-                            await btn.click(force=True)
-                            print(f"[Zepto Checkout] Clicked initial 'Add' button via '{sel}'")
-                            await asyncio.sleep(3)
-                            added = True
-                            break
-                    except:
-                        continue
+            for add_sel in [
+                "button:has-text('Add To Cart')",
+                "button:has-text('Add to Cart')",
+                "button:has-text('ADD')",
+                "button:has-text('Add')",
+                "div[role='button']:has-text('Add')",
+                "button[aria-label='Increase quantity by one']",
+            ]:
+                try:
+                    add_btn = page.locator(add_sel).first
+                    if await add_btn.is_visible():
+                        await add_btn.scroll_into_view_if_needed()
+                        await asyncio.sleep(0.3)
+                        await add_btn.click()
+                        print(f"[Zepto Checkout] Clicked ADD via '{add_sel}'")
+                        await asyncio.sleep(3)  # Wait for button to morph into [- qty +]
+                        added = True
+                        break
+                except:
+                    continue
+            
+            # Fallback: try JS click
+            if not added:
+                add_result = await page.evaluate(r'''
+                    () => {
+                        const all = Array.from(document.querySelectorAll("button, div[role='button']"));
+                        const addBtn = all.find(b => {
+                            const t = (b.innerText || "").trim().toLowerCase();
+                            return t === "add" || t === "add to cart" || t === "add to basket";
+                        });
+                        if (addBtn) { addBtn.click(); return "clicked_add:" + addBtn.innerText.trim(); }
+                        const plus = document.querySelector("button[aria-label='Increase quantity by one']");
+                        if (plus) return "already_in_cart";
+                        return "not_found";
+                    }
+                ''')
+                if add_result and (add_result.startswith("clicked_add") or add_result == "already_in_cart"):
+                    print(f"[Zepto Checkout] JS fallback add: {add_result}")
+                    await asyncio.sleep(3)
+                    added = True
+                else:
+                    print(f"[Zepto Checkout] WARNING: Could not click 'Add' button for {item.product_url}. Result: {add_result}")
             
             if not added:
                 print(f"[Zepto Checkout] WARNING: Could not click 'Add' button for {item.product_url}")
@@ -384,8 +408,13 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
 
 async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: List[CheckoutItem]):
     browser = await p.chromium.launch(
-        headless=True,  # Headless — cart is server-side, user views via 'Go to Cart' button
-        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        headless=False,  # Visible browser — Blinkit React events don't fire properly in headless
+        args=[
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--window-position=0,0",
+        ]
     )
     context = await browser.new_context(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
