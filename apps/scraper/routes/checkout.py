@@ -163,11 +163,16 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             try {
                 const u = localStorage.getItem("user");
                 const parsed = u ? JSON.parse(u) : null;
-                return parsed ? "logged_in:" + (parsed.phone || parsed.name || "unknown") : "guest";
+                // If the user object is valid and has a name or phone, we're fully logged in
+                return parsed && (parsed.phone || parsed.name) ? "logged_in:" + (parsed.phone || parsed.name) : "guest";
             } catch(e) { return "error:" + e.message; }
         }
     ''')
     print(f"[Zepto Checkout] Login state after loading cookies: {login_state}")
+    if login_state.startswith("guest") or login_state.startswith("error"):
+        print("[Zepto Checkout] Aborting: Session expired or invalid. Cart will not sync to user's device.")
+        await browser.close()
+        return [{"url": i.product_url, "status": "error", "error": "Session Expired. Please reconnect Zepto."} for i in items]
     
     # ── Clear the existing cart first so we start fresh ──────────────────────
     print("[Zepto Checkout] Clearing existing cart...")
@@ -351,9 +356,15 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
         await asyncio.sleep(2)
         text = await page.evaluate("document.body.innerText")
         totals = parse_bill(text)
-        if totals:
+        if totals and (totals.get('item_total') or totals.get('total_payable')):
             results.append({"type": "cart_summary", "totals": totals})
             print(f"[Zepto Checkout] Cart Bill Extracted: {totals}")
+        else:
+            print("[Zepto Checkout] Cart is empty after adding items! Session likely expired.")
+            for r in results:
+                if r.get('status') == 'success':
+                    r['status'] = 'error'
+                    r['error'] = 'Session expired or item unavailable.'
     except Exception as e:
         print(f"[Zepto Checkout] Failed to extract bill: {e}")
     await browser.close()
@@ -415,9 +426,15 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
         await asyncio.sleep(2)
         text = await page.evaluate("document.body.innerText")
         totals = parse_bill(text)
-        if totals:
+        if totals and (totals.get('item_total') or totals.get('total_payable')):
             results.append({"type": "cart_summary", "totals": totals})
             print(f"[Blinkit Checkout] Cart Bill Extracted: {totals}")
+        else:
+            print("[Blinkit Checkout] Cart is empty after adding items! Session likely expired.")
+            for r in results:
+                if r.get('status') in ['success', 'partial']:
+                    r['status'] = 'error'
+                    r['error'] = 'Session expired or item unavailable.'
     except Exception as e:
         print(f"[Blinkit Checkout] Failed to extract bill: {e}")
     await browser.close()
@@ -495,9 +512,15 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
         await asyncio.sleep(2)
         text = await page.evaluate("document.body.innerText")
         totals = parse_bill(text)
-        if totals:
+        if totals and (totals.get('item_total') or totals.get('total_payable')):
             results.append({"type": "cart_summary", "totals": totals})
             print(f"[Bigbasket Checkout] Cart Bill Extracted: {totals}")
+        else:
+            print("[Bigbasket Checkout] Cart is empty after adding items! Session likely expired.")
+            for r in results:
+                if r.get('status') in ['success', 'partial']:
+                    r['status'] = 'error'
+                    r['error'] = 'Session expired or item unavailable.'
     except Exception as e:
         print(f"[Bigbasket Checkout] Failed to extract bill: {e}")
     await browser.close()
