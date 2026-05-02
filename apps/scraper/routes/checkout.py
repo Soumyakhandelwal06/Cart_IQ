@@ -564,12 +564,11 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
         ''')
         print(f"[Blinkit Checkout] localStorage cart: {cart_info}")
         if cart_info and cart_info.get('count', 0) > 0:
-            # Extract full cart data to save back to user's session in MongoDB
             full_cart = await page.evaluate("() => localStorage.getItem('cart')")
             results.append({
                 "type": "cart_summary",
                 "totals": {"item_total": cart_info.get('total', 0), "item_count": cart_info['count']},
-                "cart_data": full_cart  # Full cart JSON for session update
+                "cart_data": full_cart
             })
             print(f"[Blinkit Checkout] Cart verified via localStorage: {cart_info['count']} items ✅")
             
@@ -577,6 +576,20 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             updated_state = await context.storage_state()
             results.append({"type": "updated_storage_state", "state": updated_state})
             print("[Blinkit Checkout] Updated storageState captured for saving back to MongoDB ✅")
+            
+            # Navigate to blinkit.com/cart and keep browser open in background
+            # This is the ONLY way to let the user see their cart since Blinkit is localStorage-only
+            async def keep_open_and_navigate():
+                try:
+                    await page.goto("https://blinkit.com/cart", wait_until="domcontentloaded", timeout=15000)
+                    print("[Blinkit Checkout] Navigated to blinkit.com/cart — browser open for user 🛒")
+                    await asyncio.sleep(300)  # Keep open for 5 minutes
+                except: pass
+                finally:
+                    try: await browser.close()
+                    except: pass
+            asyncio.create_task(keep_open_and_navigate())
+            return results  # Return immediately — browser stays open in background
         else:
             # Fallback: go to cart page and parse text
             try:

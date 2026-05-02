@@ -104,4 +104,15 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /cart-redirect/:platform — Simple redirect helper for platforms that need it
+router.get('/cart-redirect/:platform', authMiddleware, async (req, res) => {
+  const { platform } = req.params;
+  const urls = {
+    blinkit: 'https://blinkit.com/cart',
+    zepto: 'https://www.zepto.com',
+    bigbasket: 'https://www.bigbasket.com/basket/'
+  };
+  return res.redirect(urls[platform] || '/');
+});
+
 module.exports = router;
