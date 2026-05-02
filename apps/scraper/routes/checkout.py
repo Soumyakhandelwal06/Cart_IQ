@@ -171,22 +171,37 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
         print(f"[Zepto Checkout] Homepage load warning (ignoring): {e}")
     await asyncio.sleep(3)
     
-    # Debug: check if logged in — check multiple auth signals (localStorage + cookies)
+    # Debug: check if logged in — Zepto stores user as { state: { user: {...}, isAuth: true }, version: 1 }
     await asyncio.sleep(2)  # Extra wait for visible browser to hydrate localStorage from cookies
     login_state = await page.evaluate(r'''
         () => {
             try {
-                // Check 1: localStorage.user
+                // Zepto uses Zustand: localStorage.user = { state: { user: {...}, isAuth: bool }, version: N }
                 const u = localStorage.getItem("user");
                 const parsed = u ? JSON.parse(u) : null;
-                if (parsed && (parsed.phone || parsed.name)) return "logged_in:" + (parsed.phone || parsed.name);
                 
-                // Check 2: localStorage.auth or authKey
+                // Check 1: Zustand-style nested structure (Zepto's actual format)
+                const userState = parsed?.state?.user;
+                const isAuth = parsed?.state?.isAuth;
+                if (userState && (userState.mobileNumber || userState.fullName || userState.id)) {
+                    const id = userState.mobileNumber || userState.fullName || userState.id;
+                    return "logged_in:" + id;
+                }
+                if (isAuth === true) return "logged_in:isAuth";
+                
+                // Check 2: Flat structure (older Zepto sessions)
+                if (parsed && (parsed.phone || parsed.name || parsed.mobileNumber)) {
+                    return "logged_in:" + (parsed.phone || parsed.mobileNumber || parsed.name);
+                }
+                
+                // Check 3: customerId / id at top level
+                if (parsed && (parsed.customerId || parsed.id || parsed.userId)) {
+                    return "logged_in:customer_" + (parsed.id || parsed.customerId);
+                }
+                
+                // Check 4: any auth-related key
                 const auth = localStorage.getItem("auth") || localStorage.getItem("authKey") || localStorage.getItem("authKeyITS");
                 if (auth && auth.length > 10) return "logged_in:auth_token";
-                
-                // Check 3: localStorage.user but with customerId
-                if (parsed && (parsed.customerId || parsed.id || parsed.userId)) return "logged_in:customer";
                 
                 return "guest";
             } catch(e) { return "error:" + e.message; }
@@ -259,126 +274,116 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                 except:
                     pass
 
-            # Click the initial ADD button using Playwright native click (React requires real pointer events)
+            # ─── PHASE 1: Click ADD once using JS DOM scan + mouse.click ─────────────
+            # Zepto is React-based — must use real pointer events (locators fail silently)
             added = False
-            for add_sel in [
-                "button:has-text('Add To Cart')",
-                "button:has-text('Add to Cart')",
-                "button:has-text('ADD')",
-                "button:has-text('Add')",
-                "div[role='button']:has-text('Add')",
-                "button[aria-label='Increase quantity by one']",
-            ]:
-                try:
-                    add_btn = page.locator(add_sel).first
-                    if await add_btn.is_visible():
-                        await add_btn.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.3)
-                        await add_btn.click()
-                        print(f"[Zepto Checkout] Clicked ADD via '{add_sel}'")
-                        await asyncio.sleep(3)  # Wait for button to morph into [- qty +]
-                        added = True
-                        break
-                except:
-                    continue
+            clean_name = " ".join((item.name or "").replace("\n", " ").split()).strip()
             
-            # Fallback: try JS click
-            if not added:
-                add_result = await page.evaluate(r'''
-                    () => {
-                        const all = Array.from(document.querySelectorAll("button, div[role='button']"));
-                        const addBtn = all.find(b => {
-                            const t = (b.innerText || "").trim().toLowerCase();
-                            return t === "add" || t === "add to cart" || t === "add to basket";
-                        });
-                        if (addBtn) { addBtn.click(); return "clicked_add:" + addBtn.innerText.trim(); }
-                        const plus = document.querySelector("button[aria-label='Increase quantity by one']");
-                        if (plus) return "already_in_cart";
-                        return "not_found";
-                    }
-                ''')
-                if add_result and (add_result.startswith("clicked_add") or add_result == "already_in_cart"):
-                    print(f"[Zepto Checkout] JS fallback add: {add_result}")
-                    await asyncio.sleep(3)
-                    added = True
-                else:
-                    print(f"[Zepto Checkout] WARNING: Could not click 'Add' button for {item.product_url}. Result: {add_result}")
-            
-            if not added:
-                print(f"[Zepto Checkout] WARNING: Could not click 'Add' button for {item.product_url}")
-
-            # Click [+] for additional quantity (if quantity > 1)
-            # NOTE: after clicking "Add", the button changes to a [ - N + ] stepper.
-            # We need to click '+' exactly (quantity - 1) more times.
-            extra_clicks = item.quantity - 1 if added else item.quantity
-            print(f"[Zepto Checkout] item.quantity={item.quantity}, extra_clicks={extra_clicks}")
-            
-            # Read what the current counter shows before we start incrementing
-            current_qty = await page.evaluate(r'''
-                () => {
-                    const counterEl = Array.from(document.querySelectorAll('button, div, span'))
-                        .find(e => {
-                            const t = (e.innerText || "").trim();
-                            return /^\d+$/.test(t) && parseInt(t) >= 1 &&
-                                   e.parentElement && e.parentElement.children.length === 3;
-                        });
-                    return counterEl ? parseInt(counterEl.innerText.trim()) : 1;
-                }
-            ''')
-            print(f"[Zepto Checkout] Current counter = {current_qty}, target = {item.quantity}")
-            
-            for click_num in range(extra_clicks):
-                target_after_click = current_qty + 1
-                clicked_plus = False
+            add_coords = await page.evaluate("""
+            (name) => {
+                // Find any visible element with text "Add to Cart", "ADD", or "Add"
+                const candidates = Array.from(document.querySelectorAll('*')).filter(e => {
+                    const t = (e.innerText || '').trim();
+                    return t === 'Add to Cart' || t === 'ADD' || t === 'Add';
+                }).filter(e => {
+                    const r = e.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
                 
-                # Try up to 5 times — verify the counter actually incremented
-                for attempt in range(5):
-                    res = await page.evaluate(r'''
-                        () => {
-                            let plusBtn = document.querySelector("button[aria-label='Increase quantity by one']");
-                            if (plusBtn) { plusBtn.click(); return 'clicked:aria-label'; }
-                            const counterEl = Array.from(document.querySelectorAll('button, div, span'))
-                                .find(e => {
-                                    const t = (e.innerText || "").trim();
-                                    return /^\d+$/.test(t) && parseInt(t) >= 1 &&
-                                           e.parentElement && e.parentElement.children.length === 3;
-                                });
-                            if (counterEl && counterEl.parentElement) {
-                                const btn = counterEl.parentElement.children[2];
-                                if (btn) { btn.click(); return 'clicked:stepper-' + counterEl.innerText; }
+                if (!candidates.length) return null;
+                
+                // Try to find the one in the correct product card
+                if (name) {
+                    const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+                        .filter(w => w.length > 3).slice(0, 2);
+                    for (const el of candidates) {
+                        let parent = el.parentElement;
+                        for (let d = 0; d < 15 && parent; d++) {
+                            const txt = (parent.innerText || '').toLowerCase();
+                            if (words.length && words.every(w => txt.includes(w))) {
+                                el.scrollIntoView({block: 'center', behavior: 'instant'});
+                                const r = el.getBoundingClientRect();
+                                return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'name_match'};
                             }
-                            return 'not_found';
+                            parent = parent.parentElement;
                         }
-                    ''')
-                    
-                    if not res or not res.startswith('clicked'):
-                        await asyncio.sleep(2)
-                        continue
-                    
-                    # Wait and verify the counter actually went up
-                    await asyncio.sleep(2.5)
-                    new_qty = await page.evaluate(r'''
-                        () => {
-                            const counterEl = Array.from(document.querySelectorAll('button, div, span'))
-                                .find(e => {
-                                    const t = (e.innerText || "").trim();
-                                    return /^\d+$/.test(t) && parseInt(t) >= 1 &&
-                                           e.parentElement && e.parentElement.children.length === 3;
-                                });
-                            return counterEl ? parseInt(counterEl.innerText.trim()) : -1;
-                        }
-                    ''')
-                    print(f"[Zepto Checkout] [+] click {click_num+1} attempt {attempt+1}: {res} → counter now={new_qty} (expected {target_after_click})")
-                    
-                    if new_qty == target_after_click:
-                        current_qty = new_qty
-                        clicked_plus = True
-                        break
-                    # Counter didn't update — retry after a longer pause
-                    await asyncio.sleep(2)
+                    }
+                }
                 
-                if not clicked_plus:
-                    print(f"[Zepto Checkout] ❌ Could not increment to {target_after_click} for {item.product_url}")
+                // Fallback: first visible ADD
+                candidates[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                const r = candidates[0].getBoundingClientRect();
+                return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'fallback'};
+            }
+            """, clean_name)
+            
+            if add_coords:
+                await asyncio.sleep(0.4)
+                await page.mouse.click(add_coords['x'], add_coords['y'])
+                print(f"[Zepto Checkout] ADD click [{add_coords['found']}] at ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
+                await asyncio.sleep(3)  # Wait for morphing to stepper
+                added = True
+            else:
+                print(f"[Zepto Checkout] WARNING: No ADD element found for {item.product_url}")
+
+            # ─── PHASE 2: Click + stepper (quantity - 1) more times ──────────────────
+            if added and item.quantity > 1:
+                for extra in range(item.quantity - 1):
+                    plus_clicked = False
+                    for attempt in range(3):
+                        try:
+                            plus_coords = await page.evaluate("""
+                            (name) => {
+                                // Find stepper + buttons
+                                const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
+                                    const directText = Array.from(e.childNodes)
+                                        .filter(n => n.nodeType === 3)
+                                        .map(n => n.textContent.trim()).join('');
+                                    return directText === '+' || e.getAttribute('aria-label') === 'Increase quantity by one';
+                                }).filter(e => {
+                                    const r = e.getBoundingClientRect();
+                                    return r.width > 0 && r.height > 0;
+                                });
+                                if (!plusEls.length) return null;
+                                
+                                // Find + inside correct product card
+                                if (name) {
+                                    const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+                                        .filter(w => w.length > 3).slice(0, 2);
+                                    for (const el of plusEls) {
+                                        let parent = el.parentElement;
+                                        for (let d = 0; d < 15 && parent; d++) {
+                                            const txt = (parent.innerText || '').toLowerCase();
+                                            if (words.every(w => txt.includes(w))) {
+                                                el.scrollIntoView({block: 'center', behavior: 'instant'});
+                                                const r = el.getBoundingClientRect();
+                                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                            }
+                                            parent = parent.parentElement;
+                                        }
+                                    }
+                                }
+                                plusEls[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                                const r = plusEls[0].getBoundingClientRect();
+                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                            }
+                            """, clean_name)
+                            
+                            if plus_coords:
+                                await asyncio.sleep(0.3)
+                                await page.mouse.click(plus_coords['x'], plus_coords['y'])
+                                plus_clicked = True
+                                print(f"[Zepto Checkout] + click #{extra+2} at ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
+                                await asyncio.sleep(1.5)
+                                break
+                            else:
+                                print(f"[Zepto Checkout] + stepper attempt {attempt+1}: not found")
+                                await asyncio.sleep(1)
+                        except Exception as ce:
+                            print(f"[Zepto Checkout] + stepper attempt {attempt+1} error: {ce}")
+                            await asyncio.sleep(0.5)
+                    if not plus_clicked:
+                        print(f"[Zepto Checkout] Could not click + for unit {extra+2}")
             
 
             results.append({"url": item.product_url, "status": "success", "added_qty": item.quantity})
