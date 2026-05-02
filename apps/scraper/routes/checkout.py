@@ -423,8 +423,14 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
     )
     await stealth_async(context)
     page = await context.new_page()
-    await page.goto("https://blinkit.com", wait_until="domcontentloaded")
+    try:
+        await page.goto("https://blinkit.com", wait_until="domcontentloaded", timeout=20000)
+    except: pass
     await asyncio.sleep(2)
+    
+    # Clear localStorage cart before adding — prevents stale data making verification pass
+    await page.evaluate("() => { try { localStorage.removeItem('cart'); } catch(e) {} }")
+    print("[Blinkit Checkout] Cleared stale localStorage cart")
     
     results = []
     for item in items:
@@ -580,65 +586,66 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             for i in range(item.quantity):
                 clicked = False
                 
-                # Use Playwright's native click (NOT JS element.click()) so React's
-                # synthetic event system properly fires and makes the API call to add to cart
                 if item.name:
-                    # Extract first meaningful word(s) from the item name for a broad text match
                     base_name = item.name.split('\n')[0].strip()
                     
-                    # Try to find the card first, then click ADD inside it natively
-                    for attempt in range(3):
+                    for attempt in range(4):
                         try:
-                            # Strategy: find product cards matching our name, then find ADD inside
-                            card_found = await page.evaluate("""
+                            # Find the correct product card and get the Add button's screen coordinates
+                            btn_info = await page.evaluate("""
                             (name) => {
                                 const baseName = name.split('\\n')[0].toLowerCase();
                                 const words = baseName.replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
                                     .filter(w => w.length > 2 && !/^(\\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
                                     .slice(0, 2);
-                                if (!words.length) return false;
-                                const els = Array.from(document.querySelectorAll('div, a, li')).filter(e => {
-                                    const txt = (e.innerText || '').toLowerCase();
-                                    return words.every(w => txt.includes(w));
+                                if (!words.length) return null;
+                                
+                                // Find all product cards that contain our words
+                                const cards = Array.from(document.querySelectorAll('div, li, article'))
+                                    .filter(e => {
+                                        const txt = (e.innerText || '').toLowerCase();
+                                        if (!words.every(w => txt.includes(w))) return false;
+                                        const rect = e.getBoundingClientRect();
+                                        // Must be a reasonably sized element (not the whole page)
+                                        return rect.width > 50 && rect.width < 700 && rect.height > 50 && rect.height < 700;
+                                    });
+                                if (!cards.length) return {found: false, reason: 'no_card'};
+                                
+                                // Sort by smallest area to get most specific card
+                                cards.sort((a, b) => {
+                                    const ra = a.getBoundingClientRect();
+                                    const rb = b.getBoundingClientRect();
+                                    return (ra.width * ra.height) - (rb.width * rb.height);
                                 });
-                                // Scroll the first matching card into view so Playwright can click it
-                                if (els.length) { els[0].scrollIntoView({block:'center'}); return true; }
-                                return false;
+                                
+                                for (const card of cards.slice(0, 5)) {
+                                    const addBtn = Array.from(card.querySelectorAll('button'))
+                                        .find(b => (b.innerText || '').trim().toLowerCase() === 'add');
+                                    if (addBtn) {
+                                        addBtn.scrollIntoView({block: 'center', behavior: 'instant'});
+                                        const r = addBtn.getBoundingClientRect();
+                                        if (r.width === 0) return {found: false, reason: 'btn_zero_size'};
+                                        return {found: true, x: r.x + r.width/2, y: r.y + r.height/2};
+                                    }
+                                }
+                                return {found: false, reason: 'no_add_btn_in_card'};
                             }
                             """, base_name)
                             
-                            if not card_found:
-                                print(f"  -> BB attempt {attempt+1}: card not found for '{base_name}'")
-                                await asyncio.sleep(1.5)
-                                continue
-                            
-                            await asyncio.sleep(0.5)  # Let scroll settle
-                            
-                            # Find the ADD / ADD TO BASKET button using Playwright locator
-                            # Filter to only buttons that are children of a card containing our product name
-                            add_btn = None
-                            for btn_text in ['Add', 'ADD', 'ADD TO BASKET', 'Add to basket']:
-                                candidates = page.get_by_role("button", name=btn_text, exact=True)
-                                count = await candidates.count()
-                                if count > 0:
-                                    add_btn = candidates.first
-                                    break
-                            
-                            # Fallback: look for any element with text "ADD" near our product
-                            if not add_btn:
-                                add_btn = page.locator("text='ADD'").first
-                            
-                            if add_btn and await add_btn.is_visible():
-                                await add_btn.scroll_into_view_if_needed()
-                                await asyncio.sleep(0.3)
-                                await add_btn.click()
+                            if btn_info and btn_info.get('found'):
+                                await asyncio.sleep(0.3)  # Let scroll settle
+                                await page.mouse.click(btn_info['x'], btn_info['y'])
                                 success_clicks += 1
                                 clicked = True
-                                print(f"  -> BB native click attempt {attempt+1} for '{base_name}': clicked ✅")
+                                print(f"  -> BB click attempt {attempt+1} for '{base_name}': clicked at ({btn_info['x']:.0f},{btn_info['y']:.0f}) ✅")
                                 await asyncio.sleep(2.5)
                                 break
                             else:
-                                print(f"  -> BB attempt {attempt+1}: ADD button not visible")
+                                reason = btn_info.get('reason', 'unknown') if btn_info else 'null_result'
+                                print(f"  -> BB attempt {attempt+1}: not found ({reason}) for '{base_name}'")
+                                if attempt < 3:
+                                    await page.evaluate("window.scrollTo(0, 0)")  # Scroll back to top and retry
+                                    await asyncio.sleep(1)
                         except Exception as ce:
                             print(f"  -> BB attempt {attempt+1} error: {ce}")
                         await asyncio.sleep(1.5)
