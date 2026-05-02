@@ -164,12 +164,21 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
     
     page = await context.new_page()
     
-    # Land on homepage first to ensure cookies are applied correctly
+    # Land on homepage first — cookies must be applied before navigating to products
     try:
         await page.goto("https://www.zepto.com", wait_until="domcontentloaded", timeout=20000)
     except Exception as e:
         print(f"[Zepto Checkout] Homepage load warning (ignoring): {e}")
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)  # Wait for React to hydrate localStorage from cookies
+    
+    # If still showing Login, reload once to force cookie application
+    header_text = await page.evaluate("() => document.body.innerText.substring(0, 200)")
+    if 'Login' in header_text and 'Account' not in header_text:
+        print("[Zepto Checkout] Session not yet visible, reloading...")
+        try:
+            await page.reload(wait_until="domcontentloaded", timeout=20000)
+        except: pass
+        await asyncio.sleep(4)
     
     # Debug: check if logged in — Zepto stores user as { state: { user: {...}, isAuth: true }, version: 1 }
     await asyncio.sleep(2)  # Extra wait for visible browser to hydrate localStorage from cookies
@@ -276,15 +285,16 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
 
             # ─── PHASE 1: Click ADD once using JS DOM scan + mouse.click ─────────────
             # Zepto is React-based — must use real pointer events (locators fail silently)
+            # NOTE: Zepto uses "Add To Cart" (capital T, C) — match case-insensitively
             added = False
             clean_name = " ".join((item.name or "").replace("\n", " ").split()).strip()
             
             add_coords = await page.evaluate("""
             (name) => {
-                // Find any visible element with text "Add to Cart", "ADD", or "Add"
+                // Find any visible element with ADD-like text — case insensitive
                 const candidates = Array.from(document.querySelectorAll('*')).filter(e => {
-                    const t = (e.innerText || '').trim();
-                    return t === 'Add to Cart' || t === 'ADD' || t === 'Add';
+                    const t = (e.innerText || '').trim().toLowerCase();
+                    return t === 'add to cart' || t === 'add' || t === 'add to basket';
                 }).filter(e => {
                     const r = e.getBoundingClientRect();
                     return r.width > 0 && r.height > 0;
@@ -310,7 +320,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                     }
                 }
                 
-                // Fallback: first visible ADD
+                // Fallback: first visible ADD-like button
                 candidates[0].scrollIntoView({block: 'center', behavior: 'instant'});
                 const r = candidates[0].getBoundingClientRect();
                 return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'fallback'};
@@ -327,6 +337,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                 print(f"[Zepto Checkout] WARNING: No ADD element found for {item.product_url}")
 
             # ─── PHASE 2: Click + stepper (quantity - 1) more times ──────────────────
+            # NOTE: Zepto uses SVG icons for + button, NOT text '+'. Use aria-label.
             if added and item.quantity > 1:
                 for extra in range(item.quantity - 1):
                     plus_clicked = False
@@ -334,38 +345,44 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                         try:
                             plus_coords = await page.evaluate("""
                             (name) => {
-                                // Find stepper + buttons
-                                const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
-                                    const directText = Array.from(e.childNodes)
-                                        .filter(n => n.nodeType === 3)
-                                        .map(n => n.textContent.trim()).join('');
-                                    return directText === '+' || e.getAttribute('aria-label') === 'Increase quantity by one';
-                                }).filter(e => {
-                                    const r = e.getBoundingClientRect();
-                                    return r.width > 0 && r.height > 0;
-                                });
-                                if (!plusEls.length) return null;
+                                // Zepto stepper: look for button with aria-label containing 'increase'
+                                // OR look for the rightmost button in a [- N +] stepper group
+                                const ariaPlus = Array.from(document.querySelectorAll('button, [role="button"]')).filter(e => {
+                                    const a = (e.getAttribute('aria-label') || '').toLowerCase();
+                                    return a.includes('increase') || a.includes('add more');
+                                }).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
                                 
-                                // Find + inside correct product card
-                                if (name) {
-                                    const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
-                                        .filter(w => w.length > 3).slice(0, 2);
-                                    for (const el of plusEls) {
-                                        let parent = el.parentElement;
-                                        for (let d = 0; d < 15 && parent; d++) {
-                                            const txt = (parent.innerText || '').toLowerCase();
-                                            if (words.every(w => txt.includes(w))) {
-                                                el.scrollIntoView({block: 'center', behavior: 'instant'});
-                                                const r = el.getBoundingClientRect();
-                                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                if (ariaPlus.length) {
+                                    // Find the one in the correct product card
+                                    if (name) {
+                                        const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0,2);
+                                        for (const el of ariaPlus) {
+                                            let parent = el.parentElement;
+                                            for (let d = 0; d < 15 && parent; d++) {
+                                                if (words.every(w => (parent.innerText||'').toLowerCase().includes(w))) {
+                                                    el.scrollIntoView({block:'center',behavior:'instant'});
+                                                    const r = el.getBoundingClientRect();
+                                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria'};
+                                                }
+                                                parent = parent.parentElement;
                                             }
-                                            parent = parent.parentElement;
                                         }
+                                        // fallback: first matching aria button
+                                        ariaPlus[0].scrollIntoView({block:'center',behavior:'instant'});
+                                        const r = ariaPlus[0].getBoundingClientRect();
+                                        return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-fallback'};
                                     }
                                 }
-                                plusEls[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                                
+                                // Last resort: look for '+' text nodes
+                                const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
+                                    const directText = Array.from(e.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('');
+                                    return directText === '+';
+                                }).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                                if (!plusEls.length) return null;
+                                plusEls[0].scrollIntoView({block:'center',behavior:'instant'});
                                 const r = plusEls[0].getBoundingClientRect();
-                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                return {x: r.x+r.width/2, y: r.y+r.height/2, via:'text'};
                             }
                             """, clean_name)
                             
