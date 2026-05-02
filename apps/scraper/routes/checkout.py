@@ -439,47 +439,100 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             continue
             
         try:
-            # Sanitize URL and name — strip any newlines that may have been stored in cached results
             clean_url = item.product_url.replace("\n", "").replace("\r", "").replace("%0A", "").replace("%0a", "").strip()
             clean_name = " ".join((item.name or "").replace("\n", " ").replace("\r", " ").split()).strip()
             if not clean_url or clean_url == "https://blinkit.com":
                 results.append({"url": clean_url, "status": "skipped", "reason": "No valid URL"})
                 continue
             print(f"[Blinkit Checkout] Navigating to {clean_url}")
-            await page.goto(clean_url, wait_until="domcontentloaded", timeout=15000)
-            await asyncio.sleep(2)
+            try:
+                await page.goto(clean_url, wait_until="domcontentloaded", timeout=20000)
+            except: pass
+            
+            # Wait for React to fully hydrate product cards (up to 8 seconds)
+            try:
+                await page.wait_for_function(
+                    "() => document.querySelectorAll('*').length > 100 && document.body.innerText.includes('ADD')",
+                    timeout=8000
+                )
+            except: pass
+            await asyncio.sleep(3)  # Extra wait for React event listeners to attach
             
             success_clicks = 0
             for i in range(item.quantity):
                 clicked = False
-                # Use Playwright native click — React requires real pointer events
-                # JS element.click() only fires visual ripple, not React's synthetic events
-                for attempt in range(3):
+                
+                for attempt in range(4):
                     try:
-                        add_btn = None
-                        for btn_text in ['ADD', 'Add', 'ADD TO CART', 'Add to cart']:
-                            candidates = page.get_by_role("button", name=btn_text, exact=True)
-                            if await candidates.count() > 0:
-                                add_btn = candidates.first
-                                break
-                        if not add_btn:
-                            # Fallback: any visible button/div containing "ADD" text
-                            add_btn = page.locator("button:has-text('ADD'), div[role='button']:has-text('ADD')").first
+                        # Find the first visible ADD element (any tag — Blinkit uses styled divs/spans)
+                        add_coords = await page.evaluate("""
+                        (name) => {
+                            // Find any element whose text is exactly "ADD"
+                            const addEls = Array.from(document.querySelectorAll('*')).filter(e => {
+                                // Skip elements with children (we want the leaf text node)
+                                const directText = Array.from(e.childNodes)
+                                    .filter(n => n.nodeType === 3)
+                                    .map(n => n.textContent.trim())
+                                    .join('');
+                                return directText === 'ADD' || (e.childNodes.length === 0 && (e.textContent||'').trim() === 'ADD');
+                            });
+                            
+                            // Filter to only visible ones
+                            const visible = addEls.filter(e => {
+                                const r = e.getBoundingClientRect();
+                                return r.width > 0 && r.height > 0;
+                            });
+                            
+                            if (!visible.length) return null;
+                            
+                            // If we have a name, try to find the one closest to the product
+                            // Otherwise just take the first one
+                            if (name) {
+                                const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+                                    .filter(w => w.length > 3).slice(0, 2);
+                                
+                                // Find product card for this item
+                                for (const addEl of visible) {
+                                    let parent = addEl.parentElement;
+                                    let found = false;
+                                    for (let depth = 0; depth < 15 && parent; depth++) {
+                                        const txt = (parent.innerText || '').toLowerCase();
+                                        if (words.length && words.every(w => txt.includes(w))) {
+                                            found = true;
+                                            break;
+                                        }
+                                        parent = parent.parentElement;
+                                    }
+                                    if (found) {
+                                        addEl.scrollIntoView({block: 'center', behavior: 'instant'});
+                                        const r = addEl.getBoundingClientRect();
+                                        return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                    }
+                                }
+                            }
+                            
+                            // Fallback: click first visible ADD
+                            visible[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                            const r = visible[0].getBoundingClientRect();
+                            return {x: r.x + r.width/2, y: r.y + r.height/2};
+                        }
+                        """, clean_name)
                         
-                        if add_btn and await add_btn.is_visible():
-                            await add_btn.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.3)
-                            await add_btn.click()
+                        if add_coords:
+                            await asyncio.sleep(0.4)  # Let scroll settle
+                            await page.mouse.click(add_coords['x'], add_coords['y'])
                             success_clicks += 1
                             clicked = True
-                            print(f"  -> Blinkit native click for '{clean_name}': clicked ✅")
-                            await asyncio.sleep(1.5)
+                            print(f"  -> Blinkit mouse.click for '{clean_name}': clicked at ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
+                            await asyncio.sleep(2)
                             break
                         else:
-                            print(f"  -> Blinkit attempt {attempt+1}: ADD button not visible for '{clean_name}'")
+                            print(f"  -> Blinkit attempt {attempt+1}: no ADD element found for '{clean_name}'")
+                            if attempt < 3:
+                                await asyncio.sleep(1.5)
                     except Exception as ce:
                         print(f"  -> Blinkit attempt {attempt+1} error: {ce}")
-                    await asyncio.sleep(1)
+                        await asyncio.sleep(1)
                 
                 if not clicked:
                     print(f"  -> Blinkit could not click ADD for '{clean_name}' qty {i+1}")
