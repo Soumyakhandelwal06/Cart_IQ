@@ -355,25 +355,27 @@ async def trigger_otp(platform: str, request: AuthRequest, background_tasks: Bac
             async def try_fill_and_submit(target_page, sel):
                 """Try to fill a phone input and click continue. Returns True on success."""
                 try:
+                    # 1. Click the label to properly focus the input and trigger React state
+                    if "multiform" in sel:
+                        lbl = target_page.locator("label[for='multiform']").first
+                        try: await lbl.click(timeout=3000)
+                        except: pass
+                    
                     loc = target_page.locator(sel).first
                     await loc.wait_for(state="visible", timeout=6000)
                     await loc.scroll_into_view_if_needed()
-                    # Bigbasket uses a floating label that sits on top of the input.
-                    # We must use force=True to click the input despite the label.
-                    await loc.click(force=True)
-                    await asyncio.sleep(0.8)  # Wait for modal animation
-                    await loc.type(str(request.phone), delay=80)  # char-by-char, modal-safe
+                    
+                    # Click input without force=True if label click failed
+                    try: await loc.click(timeout=2000)
+                    except: await loc.click(force=True)
+                    
+                    await asyncio.sleep(0.5)
+                    await loc.press_sequentially(str(request.phone), delay=150)
+                    
                     val = await loc.input_value()
                     if str(request.phone) not in val:
-                        # Some inputs clear on type; fallback to fill
                         await loc.fill(str(request.phone))
                     print(f"[Auth] ✅ Typed phone via locator: {sel}")
-                    
-                    # Blur to ensure React registers the input
-                    try: await loc.blur()
-                    except: pass
-                    
-                    await asyncio.sleep(1)
                     
                     # Try pressing Enter first, it's very robust and native
                     try: await loc.press("Enter")
@@ -389,26 +391,12 @@ async def trigger_otp(platform: str, request: AuthRequest, background_tasks: Bac
                         "button:has-text('Send OTP')",
                     ]:
                         try:
-                            # Fixed invalid locator syntax
                             cont_loc = target_page.locator(f"{cont_sel}:visible").first
                             await cont_loc.wait_for(state="visible", timeout=3000)
                             
-                            # 1. Native slow human coordinate click
-                            box = await cont_loc.bounding_box()
-                            if box:
-                                # Move the mouse smoothly to the button
-                                x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-                                await target_page.mouse.move(x, y, steps=10)
-                                # Slow click duration to mimic real human
-                                await target_page.mouse.down()
-                                await asyncio.sleep(0.15)
-                                await target_page.mouse.up()
-                                await asyncio.sleep(0.5)
-                                
-                            # We purposely omit 'cont_loc.click(force=True)' and JS 'el.click()' 
-                            # because reCAPTCHA flags those synthetic events and ignores the submission.
-                            
-                            print(f"[Auth] ✅ Clicked submit (human simulation): {cont_sel}")
+                            # Simple standard click works perfectly if form state is valid
+                            await cont_loc.click()
+                            print(f"[Auth] ✅ Clicked submit: {cont_sel}")
                             return True
                         except: continue
                     return True  # Phone typed even if no button found

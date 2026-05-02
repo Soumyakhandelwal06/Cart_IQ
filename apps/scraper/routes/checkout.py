@@ -154,7 +154,10 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
     page = await context.new_page()
     
     # Land on homepage first to ensure cookies are applied correctly
-    await page.goto("https://www.zepto.com", wait_until="domcontentloaded")
+    try:
+        await page.goto("https://www.zepto.com", wait_until="domcontentloaded", timeout=20000)
+    except Exception as e:
+        print(f"[Zepto Checkout] Homepage load warning (ignoring): {e}")
     await asyncio.sleep(3)
     
     # Debug: check if logged in
@@ -210,7 +213,10 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             
         try:
             print(f"[Zepto Checkout] Navigating to {item.product_url}")
-            await page.goto(item.product_url, wait_until="domcontentloaded", timeout=15000)
+            try:
+                await page.goto(item.product_url, wait_until="domcontentloaded", timeout=15000)
+            except Exception as e:
+                print(f"[Zepto Checkout] Product page load warning (ignoring): {e}")
             await asyncio.sleep(3)  # Extra wait for JS to hydrate the product page
             
             # Scroll down to reveal Add button below sticky header
@@ -475,7 +481,10 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             # Bigbasket product_url is either a direct URL or a search URL (/ps/?q=...)
             # In both cases, navigate there and use the JS clicker to find the right product card
             print(f"[Bigbasket Checkout] Navigating to {item.product_url}")
-            await page.goto(item.product_url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.goto(item.product_url, wait_until="domcontentloaded", timeout=20000)
+            except Exception as e:
+                print(f"[Bigbasket Checkout] Product page load warning (ignoring): {e}")
             await asyncio.sleep(3)  # Bigbasket is slow to render
             
             success_clicks = 0
@@ -517,6 +526,7 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             print(f"[Bigbasket Checkout] Cart Bill Extracted: {totals}")
         else:
             print("[Bigbasket Checkout] Cart is empty after adding items! Session likely expired.")
+            print(f"[Bigbasket Checkout] Page Text Preview: {text[:500]}")
             for r in results:
                 if r.get('status') in ['success', 'partial']:
                     r['status'] = 'error'

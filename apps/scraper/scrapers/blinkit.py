@@ -43,14 +43,21 @@ async def scrape_blinkit(items, lat: Optional[float], lon: Optional[float], stor
         await apply_stealth(page)
 
         # Set location cookie first
-        await page.goto("https://blinkit.com", wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(2)
+        try:
+            await page.goto("https://blinkit.com", wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"[Blinkit] Homepage load timeout/warning (ignoring): {e}")
 
         for item in items:
             try:
                 search_query = item.brand + " " + item.name if item.brand else item.name
                 url = f"https://blinkit.com/s/?q={search_query.replace(' ', '+')}"
-                await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                except Exception as e:
+                    print(f"[Blinkit] Search page load warning (ignoring): {e}")
+                    
                 try:
                     await page.wait_for_load_state("networkidle", timeout=5000)
                 except:

@@ -52,22 +52,27 @@ async def scrape_bigbasket(items, lat: Optional[float], lon: Optional[float], st
 
         try:
             print("[Bigbasket] Landing on homepage...")
-            await page.goto("https://www.bigbasket.com/", wait_until="domcontentloaded", timeout=40000)
+            await page.goto("https://www.bigbasket.com/", wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(5)
-            
-            # Close any initial popups if present
-            try:
-                close_btn = await page.query_selector("button[class*='close'], .close-btn")
-                if close_btn: await close_btn.click()
-            except: pass
-
         except Exception as e:
-            print(f"[Bigbasket] Bootstrap error: {e}")
+            print(f"[Bigbasket] Homepage load timeout/warning (ignoring): {e}")
+            
+        # Close any initial popups if present
+        try:
+            close_btn = await page.query_selector("button[class*='close'], .close-btn")
+            if close_btn: await close_btn.click()
+        except:
+            pass
 
         for item in items:
             try:
                 search_query = item.brand + " " + item.name if item.brand else item.name
                 print(f"[Bigbasket] Searching for: {search_query}")
+                try:
+                    await page.goto(f"https://www.bigbasket.com/ps/?q={search_query.replace(' ', '+')}&nc=as", wait_until="domcontentloaded", timeout=20000)
+                except Exception as e:
+                    print(f"[Bigbasket] Search page load warning (ignoring): {e}")
+                await asyncio.sleep(3)
                 
                 # BigBasket Search Bar placeholder is specifically "Search for Products..."
                 # Use strict desktop container or force click to avoid interception by hidden mobile headers
