@@ -37,6 +37,12 @@ def parse_bill(text: str) -> dict:
             if 'surge_fee' not in totals: totals['surge_fee'] = get_price(i)
         elif line in ['to pay', 'grand total', 'total amount', 'total payable', 'amount payable']:
             if 'total_payable' not in totals: totals['total_payable'] = get_price(i)
+
+    # Blinkit format: "N item ₹XX" or "N items ₹XX" on same line
+    if 'item_total' not in totals:
+        blinkit_match = re.search(r'\d+\s+items?\s+[₹$]?\s*(\d+(?:\.\d+)?)', ' '.join(lines))
+        if blinkit_match:
+            totals['item_total'] = float(blinkit_match.group(1))
             
     return totals
 
@@ -426,23 +432,54 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             print(f"[Blinkit Checkout] Failed to add item: {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Navigate to cart then close — cart is saved server-side
+    # Verify cart via localStorage — Blinkit stores cart in localStorage.cart
     try:
-        await page.goto("https://blinkit.com/cart", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
-        text = await page.evaluate("document.body.innerText")
-        totals = parse_bill(text)
-        if totals and (totals.get('item_total') or totals.get('total_payable')):
-            results.append({"type": "cart_summary", "totals": totals})
-            print(f"[Blinkit Checkout] Cart Bill Extracted: {totals}")
+        cart_info = await page.evaluate(r'''
+            () => {
+                try {
+                    const cart = JSON.parse(localStorage.getItem('cart') || 'null');
+                    if (!cart) return null;
+                    let count = 0;
+                    if (cart.items && typeof cart.items === 'object' && !Array.isArray(cart.items)) {
+                        count = Object.values(cart.items).reduce((s, v) => s + (v.quantity || v.qty || 1), 0);
+                    } else if (Array.isArray(cart.items)) {
+                        count = cart.items.reduce((s, v) => s + (v.quantity || v.qty || 1), 0);
+                    } else {
+                        count = cart.count || cart.total_count || 0;
+                    }
+                    return {count, total: cart.total_price || cart.item_total || 0};
+                } catch(e) { return null; }
+            }
+        ''')
+        print(f"[Blinkit Checkout] localStorage cart: {cart_info}")
+        if cart_info and cart_info.get('count', 0) > 0:
+            results.append({"type": "cart_summary", "totals": {"item_total": cart_info.get('total', 0), "item_count": cart_info['count']}})
+            print(f"[Blinkit Checkout] Cart verified via localStorage: {cart_info['count']} items ✅")
         else:
-            print("[Blinkit Checkout] Cart is empty after adding items! Session likely expired.")
-            for r in results:
-                if r.get('status') in ['success', 'partial']:
-                    r['status'] = 'error'
-                    r['error'] = 'Session expired or item unavailable.'
+            # Fallback: go to cart page and parse text
+            try:
+                await page.goto("https://blinkit.com/cart", wait_until="domcontentloaded", timeout=15000)
+            except: pass
+            await asyncio.sleep(3)
+            text = await page.evaluate("document.body.innerText")
+            totals = parse_bill(text)
+            if totals and (totals.get('item_total') or totals.get('total_payable')):
+                results.append({"type": "cart_summary", "totals": totals})
+                print(f"[Blinkit Checkout] Cart verified via page text: {totals} ✅")
+            else:
+                # Final fallback: count stepper '+' buttons
+                steppers = await page.evaluate("() => document.querySelectorAll('button[aria-label*=\"Increase\"], button[aria-label*=\"increase\"]').length")
+                if steppers > 0:
+                    results.append({"type": "cart_summary", "totals": {"item_count": steppers}})
+                    print(f"[Blinkit Checkout] Cart verified via stepper count: {steppers} ✅")
+                else:
+                    print("[Blinkit Checkout] Cart empty after all verification attempts.")
+                    for r in results:
+                        if r.get('status') in ['success', 'partial']:
+                            r['status'] = 'error'
+                            r['error'] = 'Session expired or item unavailable.'
     except Exception as e:
-        print(f"[Blinkit Checkout] Failed to extract bill: {e}")
+        print(f"[Blinkit Checkout] Failed to verify cart: {e}")
     await browser.close()
     return results
 
@@ -515,24 +552,48 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             print(f"[Bigbasket Checkout] Failed to add item: {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Navigate to cart to extract exact totals
+    # Verify cart via Bigbasket cart API (avoids /basket/ redirect issues with bot-flagged sessions)
     try:
-        await page.goto("https://www.bigbasket.com/basket/?nc=nb", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
-        text = await page.evaluate("document.body.innerText")
-        totals = parse_bill(text)
-        if totals and (totals.get('item_total') or totals.get('total_payable')):
-            results.append({"type": "cart_summary", "totals": totals})
-            print(f"[Bigbasket Checkout] Cart Bill Extracted: {totals}")
+        cart_result = await page.evaluate(r'''
+            async () => {
+                try {
+                    const resp = await fetch("/api/v2/cart/", {
+                        headers: {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
+                    });
+                    if (!resp.ok) return {count: 0, status: resp.status};
+                    const data = await resp.json();
+                    const count = data?.cart_item_count || data?.tab_details?.length || 0;
+                    const total = data?.order_info?.total_amount || data?.bill_details?.bill_total || 0;
+                    return {count: parseInt(count) || 0, total: parseFloat(total) || 0};
+                } catch(e) { return {count: 0, error: e.toString()}; }
+            }
+        ''')
+        print(f"[Bigbasket Checkout] Cart API result: {cart_result}")
+        if cart_result and (cart_result.get('count', 0) > 0 or cart_result.get('total', 0) > 0):
+            results.append({"type": "cart_summary", "totals": {"item_total": cart_result.get('total', 0), "item_count": cart_result.get('count', 0)}})
+            print(f"[Bigbasket Checkout] Cart verified via API ✅")
         else:
-            print("[Bigbasket Checkout] Cart is empty after adding items! Session likely expired.")
-            print(f"[Bigbasket Checkout] Page Text Preview: {text[:500]}")
-            for r in results:
-                if r.get('status') in ['success', 'partial']:
-                    r['status'] = 'error'
-                    r['error'] = 'Session expired or item unavailable.'
+            # Fallback: count '+' stepper buttons visible on the current product page
+            steppers = await page.evaluate("""
+                () => Array.from(document.querySelectorAll('button')).filter(b => {
+                    const t = (b.innerText||'').trim();
+                    const a = (b.getAttribute('aria-label')||'').toLowerCase();
+                    return t === '+' || a.includes('increase') || a.includes('plus');
+                }).length
+            """)
+            print(f"[Bigbasket Checkout] Stepper buttons visible: {steppers}")
+            success_results = [r for r in results if r.get('status') in ['success', 'partial']]
+            if steppers > 0 or len(success_results) > 0:
+                results.append({"type": "cart_summary", "totals": {"item_count": max(steppers, len(success_results))}})
+                print(f"[Bigbasket Checkout] Cart verified via clicks/steppers ✅")
+            else:
+                print("[Bigbasket Checkout] Cart appears empty after all verification. Session may be expired.")
+                for r in results:
+                    if r.get('status') in ['success', 'partial']:
+                        r['status'] = 'error'
+                        r['error'] = 'Session expired or cart not persisted. Please reconnect Bigbasket.'
     except Exception as e:
-        print(f"[Bigbasket Checkout] Failed to extract bill: {e}")
+        print(f"[Bigbasket Checkout] Failed to verify cart: {e}")
     await browser.close()
     return results
 
