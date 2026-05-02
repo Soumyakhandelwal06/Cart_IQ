@@ -416,15 +416,38 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             
             success_clicks = 0
             for i in range(item.quantity):
-                if clean_name:
-                    res = await page.evaluate(CLICK_PRODUCT_BTN_JS, clean_name)
-                    print(f"  -> JS Click for '{clean_name}': {res}")
-                    if res == 'clicked':
-                        success_clicks += 1
-                        await asyncio.sleep(1.5)
-                        continue
-                    else:
-                        print(f"  -> JS Click failed for iteration {i+1} with reason: {res}")
+                clicked = False
+                # Use Playwright native click — React requires real pointer events
+                # JS element.click() only fires visual ripple, not React's synthetic events
+                for attempt in range(3):
+                    try:
+                        add_btn = None
+                        for btn_text in ['ADD', 'Add', 'ADD TO CART', 'Add to cart']:
+                            candidates = page.get_by_role("button", name=btn_text, exact=True)
+                            if await candidates.count() > 0:
+                                add_btn = candidates.first
+                                break
+                        if not add_btn:
+                            # Fallback: any visible button/div containing "ADD" text
+                            add_btn = page.locator("button:has-text('ADD'), div[role='button']:has-text('ADD')").first
+                        
+                        if add_btn and await add_btn.is_visible():
+                            await add_btn.scroll_into_view_if_needed()
+                            await asyncio.sleep(0.3)
+                            await add_btn.click()
+                            success_clicks += 1
+                            clicked = True
+                            print(f"  -> Blinkit native click for '{clean_name}': clicked ✅")
+                            await asyncio.sleep(1.5)
+                            break
+                        else:
+                            print(f"  -> Blinkit attempt {attempt+1}: ADD button not visible for '{clean_name}'")
+                    except Exception as ce:
+                        print(f"  -> Blinkit attempt {attempt+1} error: {ce}")
+                    await asyncio.sleep(1)
+                
+                if not clicked:
+                    print(f"  -> Blinkit could not click ADD for '{clean_name}' qty {i+1}")
             
             status = "success" if success_clicks == item.quantity else "partial" if success_clicks > 0 else "error"
             results.append({"url": item.product_url, "status": status, "added_qty": success_clicks})
@@ -528,19 +551,68 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             for i in range(item.quantity):
                 clicked = False
                 
-                # Try JS clicker first (uses product name to find the right card)
+                # Use Playwright's native click (NOT JS element.click()) so React's
+                # synthetic event system properly fires and makes the API call to add to cart
                 if item.name:
+                    # Extract first meaningful word(s) from the item name for a broad text match
+                    base_name = item.name.split('\n')[0].strip()
+                    
+                    # Try to find the card first, then click ADD inside it natively
                     for attempt in range(3):
-                        res = await page.evaluate(CLICK_PRODUCT_BTN_JS, item.name)
-                        print(f"  -> BB JS click attempt {attempt+1} for '{item.name}': {res}")
-                        if res == 'clicked':
-                            success_clicks += 1
-                            clicked = True
-                            await asyncio.sleep(2)
-                            break
+                        try:
+                            # Strategy: find product cards matching our name, then find ADD inside
+                            card_found = await page.evaluate("""
+                            (name) => {
+                                const baseName = name.split('\\n')[0].toLowerCase();
+                                const words = baseName.replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
+                                    .filter(w => w.length > 2 && !/^(\\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
+                                    .slice(0, 2);
+                                if (!words.length) return false;
+                                const els = Array.from(document.querySelectorAll('div, a, li')).filter(e => {
+                                    const txt = (e.innerText || '').toLowerCase();
+                                    return words.every(w => txt.includes(w));
+                                });
+                                // Scroll the first matching card into view so Playwright can click it
+                                if (els.length) { els[0].scrollIntoView({block:'center'}); return true; }
+                                return false;
+                            }
+                            """, base_name)
+                            
+                            if not card_found:
+                                print(f"  -> BB attempt {attempt+1}: card not found for '{base_name}'")
+                                await asyncio.sleep(1.5)
+                                continue
+                            
+                            await asyncio.sleep(0.5)  # Let scroll settle
+                            
+                            # Find the ADD / ADD TO BASKET button using Playwright locator
+                            # Filter to only buttons that are children of a card containing our product name
+                            add_btn = None
+                            for btn_text in ['Add', 'ADD', 'ADD TO BASKET', 'Add to basket']:
+                                candidates = page.get_by_role("button", name=btn_text, exact=True)
+                                count = await candidates.count()
+                                if count > 0:
+                                    add_btn = candidates.first
+                                    break
+                            
+                            # Fallback: look for any element with text "ADD" near our product
+                            if not add_btn:
+                                add_btn = page.locator("text='ADD'").first
+                            
+                            if add_btn and await add_btn.is_visible():
+                                await add_btn.scroll_into_view_if_needed()
+                                await asyncio.sleep(0.3)
+                                await add_btn.click()
+                                success_clicks += 1
+                                clicked = True
+                                print(f"  -> BB native click attempt {attempt+1} for '{base_name}': clicked ✅")
+                                await asyncio.sleep(2.5)
+                                break
+                            else:
+                                print(f"  -> BB attempt {attempt+1}: ADD button not visible")
+                        except Exception as ce:
+                            print(f"  -> BB attempt {attempt+1} error: {ce}")
                         await asyncio.sleep(1.5)
-                
-
                 
                 if not clicked:
                     print(f"  -> BB could not click add for '{item.name}' qty {i+1}")
