@@ -288,13 +288,24 @@ async def _extract_from_page(page, item) -> Optional[dict]:
                     if (!foundImage) {
                         const imgs = Array.from(current.querySelectorAll('img')).filter(img => img.src && !img.src.includes('data:image'));
                         if (imgs.length > 0) {
-                            // Find the best matching image for this product
-                            const bestImg = imgs.find(img => {
+                            let bestImg = imgs[0];
+                            let bestScore = -1;
+                            const nameWords = foundName.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/).filter(w => w.length > 2);
+                            
+                            for (const img of imgs) {
                                 const alt = (img.alt || "").toLowerCase();
                                 const src = img.src.toLowerCase();
-                                return queryWords.some(w => alt.includes(w) || src.includes(w));
-                            });
-                            foundImage = bestImg ? bestImg.src : imgs[0].src;
+                                let score = 0;
+                                for (const w of nameWords) {
+                                    if (alt.includes(w)) score += 2;
+                                    else if (src.includes(w)) score += 1;
+                                }
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestImg = img;
+                                }
+                            }
+                            foundImage = bestImg.src;
                         }
                     }
                     if (!foundUrl) {

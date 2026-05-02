@@ -229,13 +229,23 @@ async def _extract_first_product_blinkit(page, item) -> Optional[dict]:
                     let foundImage = null;
                     const imgs = Array.from(current.querySelectorAll('img[src*="blinkit"], img[src*="grofers"]')).filter(img => img.src && !img.src.includes('data:image'));
                     if (imgs.length > 0) {
-                        const nameSnippet = foundName.split(' ')[0].toLowerCase();
-                        const bestImg = imgs.find(img => {
+                        let bestImg = imgs[0];
+                        let bestScore = -1;
+                        const nameWords = foundName.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/).filter(w => w.length > 2);
+                        for (const img of imgs) {
                             const alt = (img.alt || "").toLowerCase();
                             const src = img.src.toLowerCase();
-                            return alt.includes(nameSnippet) || src.includes(nameSnippet);
-                        });
-                        foundImage = bestImg ? bestImg.src : imgs[0].src;
+                            let score = 0;
+                            for (const w of nameWords) {
+                                if (alt.includes(w)) score += 2;
+                                else if (src.includes(w)) score += 1;
+                            }
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestImg = img;
+                            }
+                        }
+                        foundImage = bestImg.src;
                     }
 
                     results.push({ name: foundName, price: price, url: url, image_url: foundImage });
