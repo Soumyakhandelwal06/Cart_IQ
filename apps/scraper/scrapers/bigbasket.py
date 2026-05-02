@@ -272,8 +272,7 @@ async def _extract_from_page(page, item) -> Optional[dict]:
                 let foundImage = null;
                 let foundUrl = null;
                 let searchSteps = 0;
-                
-                while (current && searchSteps < 8) {
+                   while (current && searchSteps < 8) {
                     if (!foundName) {
                         const texts = Array.from(current.querySelectorAll('h3, span, div, p'))
                             .map(el => (el.innerText || "").trim())
@@ -285,34 +284,28 @@ async def _extract_from_page(page, item) -> Optional[dict]:
                             }
                         }
                     }
-                    if (!foundImage) {
-                        const imgs = Array.from(current.querySelectorAll('img')).filter(img => img.src && !img.src.includes('data:image'));
-                        if (imgs.length > 0) {
-                            let bestImg = imgs[0];
-                            let bestScore = -1;
-                            const nameWords = foundName.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/).filter(w => w.length > 2);
-                            
-                            for (const img of imgs) {
-                                const alt = (img.alt || "").toLowerCase();
-                                const src = img.src.toLowerCase();
-                                let score = 0;
-                                for (const w of nameWords) {
-                                    if (alt.includes(w)) score += 2;
-                                    else if (src.includes(w)) score += 1;
-                                }
-                                if (score > bestScore) {
-                                    bestScore = score;
-                                    bestImg = img;
-                                }
-                            }
-                            foundImage = bestImg.src;
-                        }
-                    }
                     if (!foundUrl) {
                         const a = current.closest('a');
                         if (a && a.href && !a.href.includes('javascript:')) foundUrl = a.href;
                     }
-                    if (foundName && price && foundImage) break;
+                    
+                    // Stop climbing once we have isolated the product card (name + price)
+                    if (foundName && price) {
+                        // Extract image strictly from this card to prevent stealing ad images
+                        const img = current.querySelector('img');
+                        if (img) {
+                            // Try to get high-res from srcset if lazy-loaded
+                            if (img.srcset) {
+                                const srcset = img.srcset.split(',')[0].trim().split(' ')[0];
+                                if (srcset && !srcset.includes('data:image')) {
+                                    foundImage = srcset;
+                                }
+                            }
+                            if (!foundImage) foundImage = img.src;
+                        }
+                        break;
+                    }
+                    
                     current = current.parentElement;
                     searchSteps++;
                 }
