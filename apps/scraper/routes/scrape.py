@@ -206,9 +206,13 @@ async def scrape_all(request: ScrapeRequest, req: Request):
             platform.all_items_available = all(i.available for i in final_items)
 
             # Determine cart_status from results
-            statuses = [r.get("status", "error") for r in results]
+            statuses = [r.get("status", "error") for r in results if r.get("type") != "cart_summary"]
+            
             if all(s == "success" for s in statuses) and len(statuses) > 0:
-                platform.cart_status = "added"
+                if platform.all_items_available:
+                    platform.cart_status = "added"
+                else:
+                    platform.cart_status = "partial" # some items were not found
             elif any(s in ("success", "partial") for s in statuses):
                 platform.cart_status = "partial"
             else:
