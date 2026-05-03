@@ -450,7 +450,8 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             print(f"[Zepto Checkout] Failed to add item: {item.product_url} -> {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
-    # Navigate to cart and keep open in background — Zepto cart is local state (Zustand)
+    # Navigate to cart and extract bill info
+    success = any(r.get('status') == 'success' for r in results)
     try:
         await page.goto("https://www.zepto.com/cart", wait_until="domcontentloaded", timeout=15000)
         await asyncio.sleep(3)
@@ -460,29 +461,28 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
         if totals and (totals.get('item_total') or totals.get('total_payable')):
             results.append({"type": "cart_summary", "totals": totals})
             print(f"[Zepto Checkout] Cart Verified: {totals} ✅")
+        else:
+            print("[Zepto Checkout] Bill extraction incomplete. Items may still be in cart.")
             
-            # Capture state for persistence
+        # Always capture state if we had some success
+        if success:
             updated_state = await context.storage_state()
             results.append({"type": "updated_storage_state", "state": updated_state})
-            
-            # Keep browser open for user to checkout
-            async def keep_zepto_open():
-                try:
-                    print("[Zepto Checkout] Browser kept open for 5 minutes at /cart 🛒")
-                    await asyncio.sleep(300)
-                except: pass
-                finally:
-                    try: await browser.close()
-                    except: pass
-            asyncio.create_task(keep_zepto_open())
-            return results # Return immediately — browser stays open in task
-        else:
-            print("[Zepto Checkout] Cart appears empty after adding. Checking side-panel...")
-            await page.goto("https://www.zepto.com/?cart=open", wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-            
     except Exception as e:
-        print(f"[Zepto Checkout] Failed to verify cart: {e}")
+        print(f"[Zepto Checkout] Final navigation/verification failed: {e}")
+
+    # If any items were added successfully, keep the browser open in a background task
+    if success:
+        async def keep_zepto_open():
+            try:
+                print(f"[Zepto Checkout] Browser kept open for 5 minutes for user checkout 🛒")
+                await asyncio.sleep(300) 
+            except: pass
+            finally:
+                try: await browser.close()
+                except: pass
+        asyncio.create_task(keep_zepto_open())
+        return results
     
     await browser.close()
     return results
