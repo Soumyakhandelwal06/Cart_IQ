@@ -361,8 +361,10 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                 print(f"[Zepto Checkout] ADD click [{add_coords['found']}] at ({add_coords['x']:.0f},{add_coords['y']:.0f}) ✅")
                 await asyncio.sleep(3)  # Wait for morphing to stepper
                 added = True
+                success_clicks = 1  # Track successful clicks
             else:
                 print(f"[Zepto Checkout] WARNING: No ADD element found for {item.product_url}")
+                success_clicks = 0
 
             # ─── PHASE 2: Click + stepper (quantity - 1) more times ──────────────────
             # NOTE: Zepto uses SVG icons for + button, NOT text '+'. Use aria-label.
@@ -372,13 +374,13 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                     for attempt in range(3):
                         try:
                             plus_coords = await page.evaluate(r"""
-                            (name) => {
+                            (name, targetY) => {
                                 const vw = window.innerWidth;
                                 const vh = window.innerHeight;
                                 const headerHeight = 100;
                                 
                                 // Zepto stepper: look for button with aria-label containing 'increase'
-                                const ariaPlus = Array.from(document.querySelectorAll('button, [role="button"]')).filter(e => {
+                                let ariaPlus = Array.from(document.querySelectorAll('button, [role="button"]')).filter(e => {
                                     const a = (e.getAttribute('aria-label') || '').toLowerCase();
                                     return a.includes('increase') || a.includes('add more');
                                 }).filter(e => { 
@@ -389,22 +391,35 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                 });
                                 
                                 if (ariaPlus.length) {
+                                    // Priority 1: Match product name keywords AND stay near original Y
                                     if (name) {
                                         const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0,2);
                                         for (const el of ariaPlus) {
+                                            const r = el.getBoundingClientRect();
+                                            const cy = r.y + r.height/2;
+                                            
+                                            // Proximity check: Must be near original ADD button Y
+                                            if (Math.abs(cy - targetY) > 150) continue;
+
                                             let parent = el.parentElement;
                                             for (let d = 0; d < 15 && parent; d++) {
                                                 if (words.every(w => (parent.innerText||'').toLowerCase().includes(w))) {
                                                     el.scrollIntoView({block:'center',behavior:'instant'});
-                                                    const r = el.getBoundingClientRect();
-                                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria'};
+                                                    const r2 = el.getBoundingClientRect();
+                                                    return {x: r2.x+r2.width/2, y: r2.y+r2.height/2, via:'aria'};
                                                 }
                                                 parent = parent.parentElement;
                                             }
                                         }
                                     }
-                                    // Fallback: largest aria button in viewport
-                                    ariaPlus.sort((a,b) => b.offsetWidth*b.offsetHeight - a.offsetWidth*a.offsetHeight);
+                                    
+                                    // Priority 2: Closest to targetY in viewport
+                                    ariaPlus.sort((a,b) => {
+                                        const ra = a.getBoundingClientRect();
+                                        const rb = b.getBoundingClientRect();
+                                        return Math.abs((ra.y+ra.height/2) - targetY) - Math.abs((rb.y+rb.height/2) - targetY);
+                                    });
+                                    
                                     ariaPlus[0].scrollIntoView({block:'center',behavior:'instant'});
                                     const r = ariaPlus[0].getBoundingClientRect();
                                     return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-fallback'};
@@ -418,7 +433,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                     const r = e.getBoundingClientRect(); 
                                     const cx = r.x + r.width/2;
                                     const cy = r.y + r.height/2;
-                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh;
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh && Math.abs(cy - targetY) < 200;
                                 });
                                 
                                 if (!plusEls.length) return null;
@@ -426,12 +441,13 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                 const r = plusEls[0].getBoundingClientRect();
                                 return {x: r.x+r.width/2, y: r.y+r.height/2, via:'text'};
                             }
-                            """, clean_name)
+                            """, clean_name, add_coords['y'])
                             
                             if plus_coords:
                                 await asyncio.sleep(0.3)
                                 await page.mouse.click(plus_coords['x'], plus_coords['y'])
                                 plus_clicked = True
+                                success_clicks += 1
                                 print(f"[Zepto Checkout] + click #{extra+2} at ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
                                 await asyncio.sleep(1.5)
                                 break
@@ -444,8 +460,9 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                     if not plus_clicked:
                         print(f"[Zepto Checkout] Could not click + for unit {extra+2}")
             
-
-            results.append({"url": item.product_url, "status": "success", "added_qty": item.quantity})
+            status = "success" if success_clicks == item.quantity else "partial" if success_clicks > 0 else "error"
+            print(f"[Zepto Checkout] '{item.name}': {success_clicks}/{item.quantity} → {status}")
+            results.append({"url": item.product_url, "status": status, "added_qty": success_clicks})
         except Exception as e:
             print(f"[Zepto Checkout] Failed to add item: {item.product_url} -> {str(e)}")
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
