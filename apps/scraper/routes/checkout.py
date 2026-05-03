@@ -289,7 +289,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             added = False
             clean_name = " ".join((item.name or "").replace("\n", " ").split()).strip()
             
-            add_coords = await page.evaluate("""
+            add_coords = await page.evaluate(r"""
             (name) => {
                 const vw = window.innerWidth;
                 const vh = window.innerHeight;
@@ -371,7 +371,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                     plus_clicked = False
                     for attempt in range(3):
                         try:
-                            plus_coords = await page.evaluate("""
+                            plus_coords = await page.evaluate(r"""
                             (name) => {
                                 // Zepto stepper: look for button with aria-label containing 'increase'
                                 // OR look for the rightmost button in a [- N +] stepper group
@@ -514,7 +514,7 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
             add_coords = None
             for attempt in range(4):
                 try:
-                    add_coords = await page.evaluate("""
+                    add_coords = await page.evaluate(r"""
                     (name) => {
                         // Find any visible element whose direct text is exactly "ADD"
                         const addEls = Array.from(document.querySelectorAll('*')).filter(e => {
@@ -575,7 +575,7 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
                     plus_clicked = False
                     for attempt in range(3):
                         try:
-                            plus_coords = await page.evaluate("""
+                            plus_coords = await page.evaluate(r"""
                             (name) => {
                                 // Find stepper '+' button inside the product card matching our name
                                 const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
@@ -763,10 +763,10 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             
             for attempt in range(4):
                 try:
-                    add_coords = await page.evaluate("""
+                    add_coords = await page.evaluate(r"""
                     (name) => {
-                        const words = name.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
-                            .filter(w => w.length > 2 && !/^(\\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
+                        const words = name.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+                            .filter(w => w.length > 2 && !/^(\d+|kg|gm|g|ml|ltr|l|pack|pcs)$/.test(w))
                             .slice(0, 2);
                         
                         const cards = Array.from(document.querySelectorAll('div, li, article'))
@@ -816,9 +816,9 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
                     plus_clicked = False
                     for attempt in range(3):
                         try:
-                            plus_coords = await page.evaluate("""
+                            plus_coords = await page.evaluate(r"""
                             (name) => {
-                                const words = name.toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/)
+                                const words = name.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
                                     .filter(w => w.length > 2).slice(0, 2);
                                 
                                 const plusBtns = Array.from(document.querySelectorAll('button, div'))
@@ -893,7 +893,7 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
             print(f"[Bigbasket Checkout] Cart verified via API ✅")
         else:
             # Fallback: count '+' stepper buttons visible on the current product page
-            steppers = await page.evaluate("""
+            steppers = await page.evaluate(r"""
                 () => Array.from(document.querySelectorAll('button')).filter(b => {
                     const t = (b.innerText||'').trim();
                     const a = (b.getAttribute('aria-label')||'').toLowerCase();
