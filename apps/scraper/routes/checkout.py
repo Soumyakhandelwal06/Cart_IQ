@@ -374,7 +374,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                     for attempt in range(3):
                         try:
                             plus_coords = await page.evaluate(r"""
-                            (name, targetY) => {
+                            ({name, targetY}) => {
                                 const vw = window.innerWidth;
                                 const vh = window.innerHeight;
                                 const headerHeight = 100;
@@ -441,7 +441,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                 const r = plusEls[0].getBoundingClientRect();
                                 return {x: r.x+r.width/2, y: r.y+r.height/2, via:'text'};
                             }
-                            """, clean_name, add_coords['y'])
+                            """, {"name": clean_name, "targetY": add_coords['y']})
                             
                             if plus_coords:
                                 await asyncio.sleep(0.3)
@@ -468,7 +468,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             results.append({"url": item.product_url, "status": "error", "error": str(e)})
 
     # Navigate to cart and extract bill info
-    success = any(r.get('status') == 'success' for r in results)
+    success = any(r.get('status') in ['success', 'partial'] for r in results)
     try:
         await page.goto("https://www.zepto.com/cart", wait_until="domcontentloaded", timeout=15000)
         await asyncio.sleep(3)
