@@ -373,15 +373,22 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                         try:
                             plus_coords = await page.evaluate(r"""
                             (name) => {
+                                const vw = window.innerWidth;
+                                const vh = window.innerHeight;
+                                const headerHeight = 100;
+                                
                                 // Zepto stepper: look for button with aria-label containing 'increase'
-                                // OR look for the rightmost button in a [- N +] stepper group
                                 const ariaPlus = Array.from(document.querySelectorAll('button, [role="button"]')).filter(e => {
                                     const a = (e.getAttribute('aria-label') || '').toLowerCase();
                                     return a.includes('increase') || a.includes('add more');
-                                }).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                                }).filter(e => { 
+                                    const r = e.getBoundingClientRect(); 
+                                    const cx = r.x + r.width/2;
+                                    const cy = r.y + r.height/2;
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh;
+                                });
                                 
                                 if (ariaPlus.length) {
-                                    // Find the one in the correct product card
                                     if (name) {
                                         const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0,2);
                                         for (const el of ariaPlus) {
@@ -395,18 +402,25 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                                 parent = parent.parentElement;
                                             }
                                         }
-                                        // fallback: first matching aria button
-                                        ariaPlus[0].scrollIntoView({block:'center',behavior:'instant'});
-                                        const r = ariaPlus[0].getBoundingClientRect();
-                                        return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-fallback'};
                                     }
+                                    // Fallback: largest aria button in viewport
+                                    ariaPlus.sort((a,b) => b.offsetWidth*b.offsetHeight - a.offsetWidth*a.offsetHeight);
+                                    ariaPlus[0].scrollIntoView({block:'center',behavior:'instant'});
+                                    const r = ariaPlus[0].getBoundingClientRect();
+                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-fallback'};
                                 }
                                 
-                                // Last resort: look for '+' text nodes
+                                // Last resort: look for '+' text nodes in viewport
                                 const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
                                     const directText = Array.from(e.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('');
                                     return directText === '+';
-                                }).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                                }).filter(e => { 
+                                    const r = e.getBoundingClientRect(); 
+                                    const cx = r.x + r.width/2;
+                                    const cy = r.y + r.height/2;
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh;
+                                });
+                                
                                 if (!plusEls.length) return null;
                                 plusEls[0].scrollIntoView({block:'center',behavior:'instant'});
                                 const r = plusEls[0].getBoundingClientRect();
