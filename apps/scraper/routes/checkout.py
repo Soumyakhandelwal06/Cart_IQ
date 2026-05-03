@@ -619,46 +619,55 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
                     for attempt in range(3):
                         try:
                             plus_coords = await page.evaluate(r"""
-                            (name) => {
-                                // Find stepper '+' button inside the product card matching our name
-                                const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
-                                    .filter(w => w.length > 3).slice(0, 2);
-                                
-                                // Find all '+' elements (stepper increment)
-                                const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
-                                    const directText = Array.from(e.childNodes)
-                                        .filter(n => n.nodeType === 3)
-                                        .map(n => n.textContent.trim()).join('');
-                                    return directText === '+' || e.getAttribute('aria-label') === 'Increase quantity';
+                            ({name, targetY}) => {
+                                const vw = window.innerWidth;
+                                const vh = window.innerHeight;
+                                const headerHeight = 100;
+
+                                // Find all potential stepper '+' buttons
+                                const plusEls = Array.from(document.querySelectorAll('button, div, span, a')).filter(e => {
+                                    const text = (e.innerText || '').trim();
+                                    const aria = (e.getAttribute('aria-label') || '').toLowerCase();
+                                    return text === '+' || aria.includes('increase') || aria.includes('add more');
                                 }).filter(e => {
                                     const r = e.getBoundingClientRect();
-                                    return r.width > 0 && r.height > 0;
+                                    const cx = r.x + r.width/2;
+                                    const cy = r.y + r.height/2;
+                                    // TIGHT FILTER: Must be in viewport, below header, and VERY near targetY
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh && Math.abs(cy - targetY) < 40;
                                 });
                                 
                                 if (!plusEls.length) return null;
                                 
-                                // Find the + inside the correct product card
-                                if (words.length) {
-                                    for (const plusEl of plusEls) {
-                                        let parent = plusEl.parentElement;
-                                        for (let depth = 0; depth < 15 && parent; depth++) {
+                                // Priority 1: Match product name in parent chain
+                                if (name) {
+                                    const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0,2);
+                                    for (const el of plusEls) {
+                                        let parent = el.parentElement;
+                                        for (let d = 0; d < 12 && parent; d++) {
                                             const txt = (parent.innerText || '').toLowerCase();
                                             if (words.every(w => txt.includes(w))) {
-                                                plusEl.scrollIntoView({block: 'center', behavior: 'instant'});
-                                                const r = plusEl.getBoundingClientRect();
-                                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                                el.scrollIntoView({block:'center',behavior:'instant'});
+                                                const r = el.getBoundingClientRect();
+                                                return {x: r.x + r.width/2, y: r.y + r.height/2, via:'name'};
                                             }
                                             parent = parent.parentElement;
                                         }
                                     }
                                 }
                                 
-                                // Fallback: first + button
-                                plusEls[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                                // Priority 2: Closest to targetY
+                                plusEls.sort((a,b) => {
+                                    const ra = a.getBoundingClientRect();
+                                    const rb = b.getBoundingClientRect();
+                                    return Math.abs((ra.y+ra.height/2) - targetY) - Math.abs((rb.y+rb.height/2) - targetY);
+                                });
+                                
+                                plusEls[0].scrollIntoView({block:'center',behavior:'instant'});
                                 const r = plusEls[0].getBoundingClientRect();
-                                return {x: r.x + r.width/2, y: r.y + r.height/2};
+                                return {x: r.x + r.width/2, y: r.y + r.height/2, via:'proximity'};
                             }
-                            """, clean_name)
+                            """, {"name": clean_name, "targetY": add_coords['y']})
                             
                             if plus_coords:
                                 await asyncio.sleep(0.3)
@@ -666,14 +675,14 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
                                 success_clicks += 1
                                 plus_clicked = True
                                 print(f"  -> Blinkit + click #{extra+2} for '{clean_name}': ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
-                                await asyncio.sleep(1)
+                                await asyncio.sleep(2.5)
                                 break
                             else:
                                 print(f"  -> Blinkit Phase2 attempt {attempt+1}: no + stepper found for '{clean_name}'")
-                                await asyncio.sleep(1)
+                                await asyncio.sleep(1.5)
                         except Exception as ce:
                             print(f"  -> Blinkit Phase2 attempt {attempt+1} error: {ce}")
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(1)
                     
                     if not plus_clicked:
                         print(f"  -> Blinkit could not click + for '{clean_name}' unit {extra+2}")
