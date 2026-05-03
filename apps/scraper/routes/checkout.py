@@ -290,45 +290,70 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
             clean_name = " ".join((item.name or "").replace("\n", " ").split()).strip()
             
             add_coords = await page.evaluate("""
-            () => {
+            (name) => {
                 const vw = window.innerWidth;
                 const vh = window.innerHeight;
+                const headerHeight = 100; // Typical sticky header height
                 
-                // Step 1: Look for the main "Add To Cart" button on the product detail page
-                // This is the large button, not the small ADD buttons in carousels
-                const mainBtn = Array.from(document.querySelectorAll('button')).find(e => {
+                const words = name ? name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0, 2) : [];
+                
+                const all = Array.from(document.querySelectorAll('button, div[role="button"], span, div'));
+                const candidates = all.filter(e => {
                     const t = (e.innerText || '').trim().toLowerCase();
-                    if (t !== 'add to cart' && t !== 'add') return false;
+                    if (t !== 'add to cart' && t !== 'add' && t !== 'add to basket') return false;
+                    
                     const r = e.getBoundingClientRect();
-                    // Must be within viewport AND reasonably sized (main button is wide)
-                    return r.width > 80 && r.height > 30 &&
-                           r.x >= 0 && r.x + r.width <= vw + 50 &&
-                           r.y >= 0 && r.y + r.height <= vh + 50;
+                    const cx = r.x + r.width / 2;
+                    const cy = r.y + r.height / 2;
+                    
+                    // Filter: Must be within viewport, below header, and have reasonable size
+                    return cx > 0 && cx < vw && 
+                           cy > headerHeight && cy < vh && 
+                           r.width > 20 && r.height > 20;
+                });
+                
+                if (!candidates.length) return null;
+                
+                // Priority 1: Large "Add To Cart" button (likely the main product page button)
+                const mainBtn = candidates.find(e => {
+                    const t = (e.innerText || '').trim().toLowerCase();
+                    const r = e.getBoundingClientRect();
+                    return (t === 'add to cart' || t === 'add to basket') && r.width > 100;
                 });
                 if (mainBtn) {
                     mainBtn.scrollIntoView({block: 'center', behavior: 'instant'});
                     const r = mainBtn.getBoundingClientRect();
-                    return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'main_button', text: mainBtn.innerText.trim()};
+                    return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'main_button'};
                 }
                 
-                // Step 2: Look for any ADD-like element strictly within viewport
-                const inViewport = Array.from(document.querySelectorAll('*')).filter(e => {
-                    const t = (e.innerText || '').trim().toLowerCase();
-                    if (t !== 'add to cart' && t !== 'add' && t !== 'add to basket') return false;
-                    const r = e.getBoundingClientRect();
-                    const cx = r.x + r.width / 2;
-                    const cy = r.y + r.height / 2;
-                    // Center must be within visible viewport
-                    return cx > 0 && cx < vw && cy > 0 && cy < vh;
+                // Priority 2: Use product name matching to find the correct card
+                if (words.length) {
+                    for (const el of candidates) {
+                        let parent = el.parentElement;
+                        for (let d = 0; d < 12 && parent; d++) {
+                            const txt = (parent.innerText || '').toLowerCase();
+                            if (words.every(w => txt.includes(w))) {
+                                el.scrollIntoView({block: 'center', behavior: 'instant'});
+                                const r = el.getBoundingClientRect();
+                                return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'name_match'};
+                            }
+                            parent = parent.parentElement;
+                        }
+                    }
+                }
+                
+                // Priority 3: Fallback to the largest visible candidate
+                candidates.sort((a, b) => {
+                    const ra = a.getBoundingClientRect();
+                    const rb = b.getBoundingClientRect();
+                    return (rb.width * rb.height) - (ra.width * ra.height);
                 });
                 
-                if (!inViewport.length) return null;
-                
-                inViewport[0].scrollIntoView({block: 'center', behavior: 'instant'});
-                const r = inViewport[0].getBoundingClientRect();
-                return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'viewport_match'};
+                candidates[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                const r = candidates[0].getBoundingClientRect();
+                return {x: r.x + r.width/2, y: r.y + r.height/2, found: 'fallback_size'};
             }
-            """)
+            """, clean_name)
             
             if add_coords:
                 await asyncio.sleep(0.4)
