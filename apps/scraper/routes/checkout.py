@@ -387,33 +387,28 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                     const r = e.getBoundingClientRect(); 
                                     const cx = r.x + r.width/2;
                                     const cy = r.y + r.height/2;
-                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh;
+                                    // TIGHT FILTER: Must be in viewport, below header, and VERY near targetY
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh && Math.abs(cy - targetY) < 40;
                                 });
                                 
                                 if (ariaPlus.length) {
-                                    // Priority 1: Match product name keywords AND stay near original Y
+                                    // Match product name keywords if possible
                                     if (name) {
                                         const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w => w.length > 3).slice(0,2);
                                         for (const el of ariaPlus) {
-                                            const r = el.getBoundingClientRect();
-                                            const cy = r.y + r.height/2;
-                                            
-                                            // Proximity check: Must be near original ADD button Y
-                                            if (Math.abs(cy - targetY) > 150) continue;
-
                                             let parent = el.parentElement;
-                                            for (let d = 0; d < 15 && parent; d++) {
+                                            for (let d = 0; d < 12 && parent; d++) {
                                                 if (words.every(w => (parent.innerText||'').toLowerCase().includes(w))) {
                                                     el.scrollIntoView({block:'center',behavior:'instant'});
-                                                    const r2 = el.getBoundingClientRect();
-                                                    return {x: r2.x+r2.width/2, y: r2.y+r2.height/2, via:'aria'};
+                                                    const r = el.getBoundingClientRect();
+                                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-name'};
                                                 }
                                                 parent = parent.parentElement;
                                             }
                                         }
                                     }
                                     
-                                    // Priority 2: Closest to targetY in viewport
+                                    // Fallback: the one closest to targetY (already filtered by 40px)
                                     ariaPlus.sort((a,b) => {
                                         const ra = a.getBoundingClientRect();
                                         const rb = b.getBoundingClientRect();
@@ -422,10 +417,10 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                     
                                     ariaPlus[0].scrollIntoView({block:'center',behavior:'instant'});
                                     const r = ariaPlus[0].getBoundingClientRect();
-                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-fallback'};
+                                    return {x: r.x+r.width/2, y: r.y+r.height/2, via:'aria-proximity'};
                                 }
                                 
-                                // Last resort: look for '+' text nodes in viewport
+                                // Last resort: look for '+' text nodes in viewport within tight Y range
                                 const plusEls = Array.from(document.querySelectorAll('*')).filter(e => {
                                     const directText = Array.from(e.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('');
                                     return directText === '+';
@@ -433,7 +428,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                     const r = e.getBoundingClientRect(); 
                                     const cx = r.x + r.width/2;
                                     const cy = r.y + r.height/2;
-                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh && Math.abs(cy - targetY) < 200;
+                                    return cx > 0 && cx < vw && cy > headerHeight && cy < vh && Math.abs(cy - targetY) < 40;
                                 });
                                 
                                 if (!plusEls.length) return null;
@@ -449,7 +444,7 @@ async def add_items_to_zepto_cart(p: Playwright, storage_state: dict, items: Lis
                                 plus_clicked = True
                                 success_clicks += 1
                                 print(f"[Zepto Checkout] + click #{extra+2} at ({plus_coords['x']:.0f},{plus_coords['y']:.0f}) ✅")
-                                await asyncio.sleep(1.5)
+                                await asyncio.sleep(2.5)
                                 break
                             else:
                                 print(f"[Zepto Checkout] + stepper attempt {attempt+1}: not found")
