@@ -1907,5 +1907,26 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
                         r['error'] = 'Session expired or cart not persisted. Please reconnect Bigbasket.'
     except Exception as e:
         print(f"[Bigbasket Checkout] Failed to verify cart: {e}")
+    
+    # If any items were added successfully, keep the browser open in a background task
+    success = any(r.get('status') in ['success', 'partial'] for r in results)
+    if success:
+        try:
+            print("[Bigbasket Checkout] Navigating to basket page...")
+            await page.goto("https://www.bigbasket.com/basket/?nc=nb", wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(2)
+        except: pass
+
+        async def keep_bb_open():
+            try:
+                print(f"[Bigbasket Checkout] Browser kept open for 5 minutes for user checkout 🛒")
+                await asyncio.sleep(300) 
+            except: pass
+            finally:
+                try: await browser.close()
+                except: pass
+        asyncio.create_task(keep_bb_open())
+        return results
+
     await browser.close()
     return results
