@@ -4,8 +4,7 @@ Bigbasket Real-Time Scraper — Uses Playwright to fetch live prices from bigbas
 import asyncio
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright
-from playwright_stealth.stealth import stealth_async
-from scrapers.stealth_helper import apply_stealth
+from scrapers.stealth_helper import apply_stealth, stealth_async
 from scrapers.utils import get_final_quantity, normalize_query_words, parse_pieces_from_name, get_requested_pieces
 
 DEFAULT_LAT = 28.6139
@@ -112,6 +111,8 @@ async def scrape_bigbasket(items, lat: Optional[float], lon: Optional[float], st
                         unit_price=round(unit_price, 2),
                         quantity=adjusted_qty,
                         subtotal=round(subtotal, 2),
+                        requested_quantity=item.quantity,
+                        requested_weight=item.weight,
                         product_url=product.get("url") or page.url,
                         image_url=product.get("image_url")
                     ))
@@ -124,7 +125,9 @@ async def scrape_bigbasket(items, lat: Optional[float], lon: Optional[float], st
                         available=False,
                         unit_price=0.0,
                         quantity=item.quantity,
-                        subtotal=0.0
+                        subtotal=0.0,
+                        requested_quantity=item.quantity,
+                        requested_weight=item.weight
                     ))
             except Exception as e:
                 print(f"[Bigbasket] Error scraping {item.name}: {e}")
@@ -135,7 +138,9 @@ async def scrape_bigbasket(items, lat: Optional[float], lon: Optional[float], st
                     available=False,
                     unit_price=0.0,
                     quantity=item.quantity,
-                    subtotal=0.0
+                    subtotal=0.0,
+                    requested_quantity=item.quantity,
+                    requested_weight=item.weight
                 ))
 
         await browser.close()
@@ -390,9 +395,19 @@ def _score_and_pick(products, query_words, item):
             
     req_pieces = get_requested_pieces(item)
     
+    # Distractor words that often cause false positives if not in the query
+    DISTRACTORS = ["sweet", "spring", "baby", "red", "white", "pearl", "cherry", "grape", "frozen", "dehydrated", "flakes"]
+
     def score(p):
         n = p["name"].lower()
         match_count = sum(1 for w in query_words if w in n)
+        
+        # Penalty for significant distractor words in the result that were NOT in the query
+        distractor_penalty = 0
+        for d in DISTRACTORS:
+            if d in n and d not in " ".join(query_words):
+                distractor_penalty += 2.0  # Heavy penalty for unauthorized substitutions
+        
         starts_with_bonus = 0.5 if any(n.startswith(w) for w in query_words) else 0
         
         piece_bonus = 0
@@ -401,22 +416,33 @@ def _score_and_pick(products, query_words, item):
             if p_pieces == req_pieces:
                 piece_bonus = 5.0
                 
-        return match_count + starts_with_bonus + piece_bonus
+        return match_count + starts_with_bonus + piece_bonus - distractor_penalty
         
-    valid_products = [p for p in unique if sum(1 for w in query_words if w in p["name"].lower()) > 0]
+    def price_per_gram(p):
+        from scrapers.utils import parse_weight_to_grams
+        grams = parse_weight_to_grams(p["name"])
+        if grams <= 0:
+            return p["price"]  # Fallback to total price if weight unknown
+        return p["price"] / grams
+
+    # Minimum score threshold to prevent adding "Sweet Potato" when "Potato" was requested
+    # A score of 0 or less (after distractor penalty) means it's likely a mismatch.
+    valid_products = [p for p in unique if score(p) > 0]
+    
     if not valid_products:
-        print(f"[BigBasket] No products found containing query keywords: {query_words}")
+        print(f"[BigBasket] No products found passing similarity threshold for: {query_words}")
         return None
     
-    # If no brand is specified, pick the cheapest among the top-scoring products
-    if not item.brand:
-        top_score = score(max(valid_products, key=score))
-        top_products = [p for p in valid_products if score(p) == top_score]
-        best = min(top_products, key=lambda p: p["price"])
-        if len(top_products) > 1:
-            print(f"[BigBasket] No brand specified — picking cheapest among {len(top_products)} matches: {best['name']} @ ₹{best['price']}")
-    else:
-        best = max(valid_products, key=score)
+    # Pick the best product based on price-per-gram among top-scoring matches
+    best_score = max(score(p) for p in valid_products)
+    top_products = [p for p in valid_products if score(p) >= best_score - 0.1]
+    
+    # Among top scoring products, pick the one with best unit value (price per gram)
+    best = min(top_products, key=price_per_gram)
+    
+    if len(top_products) > 1:
+        print(f"[BigBasket] Multiple matches — picking best unit value: {best['name']} @ ₹{best['price']}")
+
     clean_name = " ".join(best["name"].split())[:60]
     return {
         "name": clean_name,
