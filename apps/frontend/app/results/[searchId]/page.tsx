@@ -41,6 +41,8 @@ export type PlatformItem = {
   unit_price: number;
   quantity: number;
   subtotal: number;
+  requested_quantity?: number;
+  requested_weight?: string | null;
   image_url?: string;
   product_url?: string;
 };
@@ -57,10 +59,15 @@ export default function ResultsPage() {
   const { searchId } = useParams() as { searchId: string };
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user, token, loading: authLoading } = useAuth();
+  const { user, token, loading: authLoading, logout } = useAuth();
   const query = searchParams.get("query") || "";
   const [state, setState] = useState<ProgressState>({ status: "connecting" });
   const esRef = useRef<EventSource | null>(null);
+  const statusRef = useRef(state.status);
+
+  useEffect(() => {
+    statusRef.current = state.status;
+  }, [state.status]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -93,7 +100,7 @@ export default function ResultsPage() {
 
       es.addEventListener("error", (e) => {
         // If we finished successfully, ignore errors
-        if (state.status === "complete") return;
+        if (statusRef.current === "complete") return;
 
         const data = JSON.parse((e as MessageEvent).data || '{"error":"Connection lost"}');
 
@@ -108,18 +115,13 @@ export default function ResultsPage() {
         }
       });
 
-      es.onerror = (e) => {
-        // EventSource.onerror is often broader than the 'error' event
-        if (es.readyState === EventSource.CLOSED && state.status !== "complete") {
-          // Handled by the 'error' event listener above or custom logic
-        }
-      };
+      es.onerror = () => {};
     };
 
     connect();
 
     return () => es?.close();
-  }, [searchId, state.status]);
+  }, [searchId, authLoading, user, token]);
 
   if (authLoading || !user) {
     return (
@@ -150,10 +152,7 @@ export default function ResultsPage() {
             <div className="flex flex-col items-end">
               <span className="text-white text-sm font-semibold">{user.name || user.phone}</span>
               <button 
-                onClick={() => {
-                  const { logout } = require("@/context/AuthContext").useAuth();
-                  logout();
-                }}
+                onClick={logout}
                 className="text-xs text-gray-500 hover:text-red-400 transition-colors"
               >
                 Logout

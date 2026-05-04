@@ -1,16 +1,17 @@
 """
-Zepto Real-Time Scraper — Uses Playwright to fetch live prices from zeptonow.com
+Zepto Real-Time Scraper — Uses Playwright to fetch live prices from zepto.com
 """
 import asyncio
 import re
 from typing import Optional, Dict, Any
+from urllib.parse import quote
 from playwright.async_api import async_playwright
-from playwright_stealth.stealth import stealth_async
-from scrapers.stealth_helper import apply_stealth
+from scrapers.stealth_helper import apply_stealth, stealth_async
 from scrapers.utils import get_final_quantity, normalize_query_words, parse_pieces_from_name, get_requested_pieces
 
 DEFAULT_LAT = 28.6139
 DEFAULT_LON = 77.2090
+ZEPTO_BASE_URL = "https://www.zepto.com"
 
 
 async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storage_state: Optional[Dict[str, Any]] = None):
@@ -21,8 +22,11 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
 
     result_items = []
     item_total = 0.0
-    delivery_fee = 25.0
-    handling_fee = 6.0
+    # Zepto currently advertises zero handling/delivery/rain fees on web for
+    # this flow. If checkout succeeds and exposes bill rows, cart analysis will
+    # overwrite these with the live values.
+    delivery_fee = 0.0
+    handling_fee = 0.0
     surge_fee = 0.0
 
     async with async_playwright() as p:
@@ -40,10 +44,11 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
         context = await browser.new_context(**ctx_kwargs)
         await stealth_async(context)
         page = await context.new_page()
+        await apply_stealth(page)
 
         # Land on Zepto first to set cookies & location
         try:
-            await page.goto("https://www.zeptonow.com", wait_until="domcontentloaded", timeout=20000)
+            await page.goto(ZEPTO_BASE_URL, wait_until="domcontentloaded", timeout=20000)
             await asyncio.sleep(2)
             # Dismiss any location popups
             for popup_sel in ["button:has-text('Allow')", "button:has-text('Use my location')", "[class*='close']"]:
@@ -60,13 +65,13 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
         for item in items:
             try:
                 search_query = item.brand + " " + item.name if item.brand else item.name
-                url = f"https://www.zeptonow.com/search?query={search_query.replace(' ', '%20')}"
+                url = f"{ZEPTO_BASE_URL}/search?query={quote(search_query)}"
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 try:
                     await page.wait_for_load_state("networkidle", timeout=5000)
                 except:
                     pass
-                await asyncio.sleep(2)
+                await _wait_for_zepto_results(page)
 
                 product = await _extract_first_product_zepto(page, item)
 
@@ -139,6 +144,34 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
     )
 
 
+async def _wait_for_zepto_results(page, timeout_ms: int = 15000) -> None:
+    """
+    Zepto often paints skeleton cards before product anchors are hydrated. Wait
+    for real product links or an explicit empty state so extraction does not run
+    against placeholders.
+    """
+    try:
+        await page.wait_for_function(
+            r"""
+            () => {
+                const productLinks = document.querySelectorAll('a[href*="/pn/"]');
+                if (productLinks.length > 0) return true;
+
+                const bodyText = (document.body.innerText || '').toLowerCase();
+                return bodyText.includes('no products') ||
+                    bodyText.includes('not found') ||
+                    bodyText.includes('currently unavailable') ||
+                    bodyText.includes('something went wrong');
+            }
+            """,
+            timeout=timeout_ms,
+        )
+    except Exception:
+        print(f"[Zepto] Timed out waiting for product cards on {page.url}")
+
+    await asyncio.sleep(0.5)
+
+
 async def _extract_first_product_zepto(page, item) -> Optional[dict]:
     """
     Robust universal extractor: finds all price-looking strings and their
@@ -147,7 +180,7 @@ async def _extract_first_product_zepto(page, item) -> Optional[dict]:
     search_query = item.brand + " " + item.name if item.brand else item.name
     query_words = normalize_query_words(search_query)
     
-    products = await page.evaluate("""
+    products = await page.evaluate(r"""
         (queryWords) => {
             const results = [];
             
@@ -176,15 +209,31 @@ async def _extract_first_product_zepto(page, item) -> Optional[dict]:
                 }
                 if (!foundName) continue;
                 
-                // Find the price: first ₹N pattern in the card
+                // Find selling price. Ignore promo/coupon strings like
+                // "₹9 OFF"; the first non-promo rupee value in a Zepto card is
+                // the visible selling price.
                 let price = null;
+                const fallbackPrices = [];
                 for (const t of allText) {
-                    const m = t.match(/₹\s*(\d+(?:\.\d+)?)/);
-                    if (m) {
+                    const lower = t.toLowerCase();
+                    const matches = [...t.matchAll(/₹\s*(\d+(?:\.\d+)?)/g)];
+                    for (const m of matches) {
                         const p = parseFloat(m[1]);
-                        if (p >= 1 && p <= 10000) { price = p; break; }
+                        if (p < 1 || p > 10000) continue;
+                        fallbackPrices.push(p);
+                        if (
+                            !lower.includes('off') &&
+                            !lower.includes('save') &&
+                            !lower.includes('coupon') &&
+                            !lower.includes('discount')
+                        ) {
+                            price = p;
+                            break;
+                        }
                     }
+                    if (price) break;
                 }
+                if (!price && fallbackPrices.length) price = fallbackPrices[0];
                 if (!price) continue;
                 
                 // Append weight info to name

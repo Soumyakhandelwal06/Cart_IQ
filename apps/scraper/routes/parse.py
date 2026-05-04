@@ -150,6 +150,8 @@ Rules for finalize_cart items:
 - name: generic lowercase (e.g. "onion", "butter", "bread")
 - quantity: integer number of units
 - weight: string like "2kg", "500g", "1L" if mentioned, otherwise null
+- For total-weight requests like "2kg onions" or "1L milk", set quantity=1 and weight="2kg"/"1L".
+- For repeated packs like "2 packs of 500g butter", set quantity=2 and weight="500g".
 - brand: brand name if mentioned (e.g. "Amul", "Britannia"), otherwise null
 - category: one of produce, dairy, bakery, beverages, snacks, staples, other
 """

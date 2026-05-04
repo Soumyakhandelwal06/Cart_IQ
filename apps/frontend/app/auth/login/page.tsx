@@ -1,7 +1,9 @@
 "use client";
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useRouter } from "next/navigation";
+
+const getErrorMessage = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message : fallback;
 
 export default function LoginPage() {
   const [phone, setPhone] = useState("");
@@ -12,7 +14,6 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [isNew, setIsNew] = useState(false);
   const { login } = useAuth();
-  const router = useRouter();
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,8 +37,8 @@ export default function LoginPage() {
 
       setIsNew(data.isNew);
       setStep("otp");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to send OTP"));
     } finally {
       setIsLoading(false);
     }
@@ -64,8 +65,8 @@ export default function LoginPage() {
       if (!res.ok) throw new Error(data.error || "Verification failed");
 
       login(data.user, data.token);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Verification failed"));
     } finally {
       setIsLoading(false);
     }
@@ -187,7 +188,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-8 text-center text-gray-500 text-xs px-6">
-          By continuing, you agree to CartIQ's Terms of Service and Privacy Policy. Secure OTP verification.
+          By continuing, you agree to CartIQ&apos;s Terms of Service and Privacy Policy. Secure OTP verification.
         </p>
       </div>
     </main>

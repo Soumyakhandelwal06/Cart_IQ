@@ -3,6 +3,17 @@ stealth_helper.py — Inline anti-bot detection for Playwright
 Replaces playwright_stealth which is broken on Python 3.12
 """
 
+try:
+    from playwright_stealth.stealth import stealth_async as _legacy_stealth_async
+except Exception:
+    _legacy_stealth_async = None
+
+try:
+    from playwright_stealth.stealth import Stealth
+except Exception:
+    Stealth = None
+
+
 def _get_stealth_js(platform="MacIntel"):
     return f"""
 // Override navigator.webdriver
@@ -39,6 +50,23 @@ Object.defineProperty(navigator, 'platform', {{
     get: () => '{platform}',
 }});
 """
+
+
+async def stealth_async(context, platform="MacIntel"):
+    """Apply stealth to a browser context across old and new playwright-stealth APIs."""
+    if _legacy_stealth_async:
+        await _legacy_stealth_async(context)
+        return
+
+    if Stealth:
+        stealth = Stealth(
+            navigator_languages_override=("en-IN", "en-US"),
+            navigator_platform_override=platform,
+        )
+        await stealth.apply_stealth_async(context)
+        return
+
+    await context.add_init_script(_get_stealth_js(platform))
 
 
 async def apply_stealth(page, platform="MacIntel"):

@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { PlatformCart } from "@/app/results/[searchId]/page";
-import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/context/AuthContext";
 
 const PLATFORM_COLORS: Record<string, { bg: string; text: string }> = {
@@ -10,27 +9,9 @@ const PLATFORM_COLORS: Record<string, { bg: string; text: string }> = {
   bigbasket: { bg: "from-green-500/20 to-green-900/10", text: "text-green-400" },
 };
 
-const PLATFORM_COLORS_LIGHT: Record<string, { gradient: string; text: string; border: string }> = {
-  blinkit: {
-    gradient: "linear-gradient(135deg, #f59e0b 0%, #fb923c 100%)",
-    text: "#ffffff",
-    border: "#f59e0b",
-  },
-  zepto: {
-    gradient: "linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)",
-    text: "#ffffff",
-    border: "#7c3aed",
-  },
-  bigbasket: {
-    gradient: "linear-gradient(135deg, #16a34a 0%, #22c55e 100%)",
-    text: "#ffffff",
-    border: "#16a34a",
-  },
-};
-
 const PLATFORM_CHECKOUT_BASE: Record<string, string> = {
   blinkit: "https://blinkit.com/",
-  zepto: "https://www.zeptonow.com/",
+  zepto: "https://www.zepto.com/",
   bigbasket: "https://www.bigbasket.com/",
 };
 
@@ -43,7 +24,6 @@ export default function WinnerBanner({
   platforms: PlatformCart[];
   searchId: string;
 }) {
-  const theme = useTheme();
   const { token } = useAuth();
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
@@ -122,7 +102,7 @@ export default function WinnerBanner({
                     setSyncSuccess(true);
                     setTimeout(() => setSyncSuccess(false), 5000);
                   }
-                } catch (err) {
+                } catch {
                   alert("Network error occurred while syncing cart.");
                 } finally {
                   setSyncing(false);

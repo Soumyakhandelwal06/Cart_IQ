@@ -67,7 +67,9 @@ router.post('/', authMiddleware, async (req, res) => {
     
     const scraperRes = await axios.post(`${SCRAPER_URL}/checkout/${platform}`, {
       storage_state: storageState,
-      items: itemsToAdd
+      items: itemsToAdd,
+      lat: stateObj.lat,
+      lon: stateObj.lon
     }, { timeout: 300000 }); // 5 minutes timeout
 
     const scraperResults = scraperRes.data.results;
@@ -90,10 +92,22 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Filter out internal result types before returning to client
     const clientResults = scraperResults.filter(r => r.type !== 'updated_storage_state');
+    const itemResults = clientResults.filter(r => r && r.url);
+    const addedCount = itemResults.filter(r => ['success', 'partial'].includes(r.status) && (r.added_qty || 0) > 0).length;
+
+    if (addedCount === 0) {
+      return res.status(502).json({
+        success: false,
+        error: `Could not verify any items in your ${platform} cart.`,
+        details: clientResults
+      });
+    }
 
     return res.json({
-      success: true,
-      message: `Successfully synced ${itemsToAdd.length} items to your ${platform} cart!`,
+      success: addedCount === itemsToAdd.length,
+      message: addedCount === itemsToAdd.length
+        ? `Successfully synced ${itemsToAdd.length} items to your ${platform} cart!`
+        : `Partially synced ${addedCount}/${itemsToAdd.length} items to your ${platform} cart.`,
       details: clientResults
     });
 

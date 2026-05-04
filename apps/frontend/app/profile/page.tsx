@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 
@@ -9,6 +9,11 @@ type PlatformStatus = {
   bigbasket: boolean;
   phone: string;
 };
+
+type PlatformId = "zepto" | "blinkit" | "bigbasket";
+
+const getErrorMessage = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message : fallback;
 
 export default function ProfilePage() {
   const { user, token, loading: authLoading } = useAuth();
@@ -27,12 +32,7 @@ export default function ProfilePage() {
     setErrors((prev) => { const n = { ...prev }; delete n[platform]; return n; });
   const router = useRouter();
 
-  useEffect(() => {
-    if (!authLoading && !user) router.push("/auth/login");
-    if (user) fetchStatus();
-  }, [user, authLoading]);
-
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const res = await fetch(`${apiUrl}/api/v1/platforms/status`, {
@@ -41,14 +41,19 @@ export default function ProfilePage() {
       const data = await res.json();
       setStatus(data);
       if (data.phone) setPhone(data.phone);
-    } catch (err) {
+    } catch {
       console.error("Failed to fetch platform status");
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  const handleTriggerOtp = async (platform: string) => {
+  useEffect(() => {
+    if (!authLoading && !user) router.push("/auth/login");
+    if (user) fetchStatus();
+  }, [user, authLoading, router, fetchStatus]);
+
+  const handleTriggerOtp = async (platform: PlatformId) => {
     setConnecting(platform);
     clearError(platform);
     try {
@@ -63,8 +68,8 @@ export default function ProfilePage() {
       });
       if (!res.ok) throw new Error("Failed to trigger OTP");
       setStep("otp");
-    } catch (err: any) {
-      setError(platform, err.message);
+    } catch (err: unknown) {
+      setError(platform, getErrorMessage(err, "Failed to trigger OTP"));
       setConnecting(null);
     }
   };
@@ -90,14 +95,14 @@ export default function ProfilePage() {
       setConnecting(null);
       setOtp("");
       await fetchStatus();
-    } catch (err: any) {
-      setError(connecting, err.message);
+    } catch (err: unknown) {
+      setError(connecting, getErrorMessage(err, "Verification failed"));
     } finally {
       setIsVerifying(false);
     }
   };
 
-  const handleDisconnect = async (platform: string) => {
+  const handleDisconnect = async (platform: PlatformId) => {
     setDisconnecting(platform);
     clearError(platform);
     try {
@@ -112,8 +117,8 @@ export default function ProfilePage() {
       });
       if (!res.ok) throw new Error("Failed to disconnect");
       await fetchStatus();
-    } catch (err: any) {
-      setError(platform, err.message);
+    } catch (err: unknown) {
+      setError(platform, getErrorMessage(err, "Failed to disconnect"));
     } finally {
       setDisconnecting(null);
     }
@@ -127,7 +132,7 @@ export default function ProfilePage() {
     );
   }
 
-  const platforms = [
+  const platforms: Array<{ id: PlatformId; name: string; color: string; icon: string }> = [
     { id: "zepto", name: "Zepto", color: "from-violet-500 to-purple-600", icon: "🟣" },
     { id: "blinkit", name: "Blinkit", color: "from-yellow-400 to-yellow-600", icon: "🟡" },
     { id: "bigbasket", name: "Bigbasket", color: "from-green-500 to-emerald-600", icon: "🟢" },
@@ -154,7 +159,7 @@ export default function ProfilePage() {
 
         <div className="space-y-4">
           {platforms.map((p) => {
-            const isConnected = (status as any)[p.id];
+            const isConnected = status?.[p.id] ?? false;
             const isActive = connecting === p.id;
 
             return (

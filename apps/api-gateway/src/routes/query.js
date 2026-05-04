@@ -90,11 +90,15 @@ async function _runPipeline(searchId, query, lat, lon, userId) {
 
     // ── Step 4: Cache and publish results ─────────────────────────────────────
     const cacheKey = `qc:state:${searchId}`;
-    await redis.set(cacheKey, JSON.stringify({ status: 'complete', data: scrapeData }), 'EX', CACHE_TTL_SECONDS).catch(() => {});
+    const finalLat = lat || 28.6139;
+    const finalLon = lon || 77.2090;
+    await redis.set(cacheKey, JSON.stringify({ status: 'complete', data: scrapeData, lat: finalLat, lon: finalLon }), 'EX', CACHE_TTL_SECONDS).catch(() => {});
 
     await _publishState(searchId, {
       status: 'complete',
-      data: scrapeData
+      data: scrapeData,
+      lat: finalLat,
+      lon: finalLon
     });
 
   } catch (err) {

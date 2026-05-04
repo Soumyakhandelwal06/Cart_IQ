@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth.stealth import stealth_async
+from scrapers.stealth_helper import stealth_async
 import json
 import os
 from datetime import datetime
@@ -577,4 +577,3 @@ async def verify_otp(platform: str, request: VerifyRequest):
         except: pass
         active_sessions.pop(session_key, None)
         raise HTTPException(status_code=500, detail=str(e))
-
