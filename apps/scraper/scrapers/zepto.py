@@ -67,7 +67,6 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
                 except:
                     pass
                 await asyncio.sleep(2)
-                await page.screenshot(path="/tmp/zepto_debug.png", full_page=True)
 
                 product = await _extract_first_product_zepto(page, item)
 
@@ -87,6 +86,8 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
                         unit_price=round(unit_price, 2),
                         quantity=adjusted_qty,
                         subtotal=round(subtotal, 2),
+                        requested_quantity=item.quantity,
+                        requested_weight=item.weight,
                         product_url=product.get("url") or page.url,
                         image_url=product.get("image_url")
                     ))
@@ -98,7 +99,9 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
                         available=False,
                         unit_price=0.0,
                         quantity=item.quantity,
-                        subtotal=0.0
+                        subtotal=0.0,
+                        requested_quantity=item.quantity,
+                        requested_weight=item.weight
                     ))
             except Exception as e:
                 print(f"[Zepto] Error scraping {item.name}: {e}")
@@ -109,7 +112,9 @@ async def scrape_zepto(items, lat: Optional[float], lon: Optional[float], storag
                     available=False,
                     unit_price=0.0,
                     quantity=item.quantity,
-                    subtotal=0.0
+                    subtotal=0.0,
+                    requested_quantity=item.quantity,
+                    requested_weight=item.weight
                 ))
 
         await browser.close()
