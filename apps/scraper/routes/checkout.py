@@ -38,38 +38,42 @@ def parse_bill(text: str) -> dict:
         r'(item total|items total|mrp total|basket value|delivery charge|delivery fee|handling charge|handling fee|platform fee|surge|small cart|rain|to pay|grand total|total amount|total payable|amount payable)'
     )
     
-    def get_price(idx):
+    def get_price(idx, is_fee=False):
         values = []
-        for j in range(idx, min(len(lines), idx + 4)):
-            val = lines[j]
-            if j > idx and label_re.search(val) and values:
-                break
-            if 'free' in val:
-                values.append(0.0)
-                continue
-            values.extend(rupee_values(val))
-        if values:
-            # Rows such as "Items total Saved ₹16 ₹100 ₹84" contain savings,
-            # MRP, then selling total. The last visible rupee amount is payable.
-            return values[-1]
+        # First, try to find a price on the SAME line as the label
+        line = lines[idx]
+        same_line_values = rupee_values(line)
+        if same_line_values:
+            # For fees, if there's a 'FREE', it's 0.
+            if is_fee and 'free' in line: return 0.0
+            # Otherwise take the LAST value on the same line
+            val = same_line_values[-1]
+            if is_fee and val > 5000: pass # Ignore suspiciously large fee values
+            else: return val
 
-        if idx + 1 < len(lines):
-            val = lines[idx + 1]
-            if 'free' in val or 'strike' in val or 'saved' in val:
-                return 0.0
-            match = re.search(r'(\d+(\.\d+)?)', val)
-            if match: return float(match.group(1))
+        # If not found on same line, look at subsequent lines
+        for j in range(idx + 1, min(len(lines), idx + 4)):
+            val = lines[j]
+            if label_re.search(val): break # Stop if we hit another label
+            
+            if is_fee and 'free' in val: return 0.0
+            
+            found = rupee_values(val)
+            if found:
+                price = found[-1]
+                if is_fee and price > 5000: continue # Skip large numbers for fees
+                return price
         return None
         
     for i, line in enumerate(lines):
         if any(x in line for x in ['item total', 'items total', 'mrp total', 'basket value', 'subtotal']):
             if 'item_total' not in totals: totals['item_total'] = get_price(i)
         elif any(x in line for x in ['delivery charge', 'delivery fee', 'shipping', 'delivery']):
-            if 'delivery_fee' not in totals: totals['delivery_fee'] = get_price(i)
+            if 'delivery_fee' not in totals: totals['delivery_fee'] = get_price(i, is_fee=True)
         elif any(x in line for x in ['handling charge', 'handling fee', 'platform fee', 'conveyance']):
-            if 'handling_fee' not in totals: totals['handling_fee'] = get_price(i)
+            if 'handling_fee' not in totals: totals['handling_fee'] = get_price(i, is_fee=True)
         elif any(x in line for x in ['surge', 'small cart', 'rain', 'night']):
-            if 'surge_fee' not in totals: totals['surge_fee'] = get_price(i)
+            if 'surge_fee' not in totals: totals['surge_fee'] = get_price(i, is_fee=True)
         elif any(x in line for x in ['to pay', 'grand total', 'total amount', 'total payable', 'amount payable', 'bill total']):
             if 'total_payable' not in totals: totals['total_payable'] = get_price(i)
 
