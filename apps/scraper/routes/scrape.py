@@ -158,6 +158,9 @@ def _apply_cart_analysis(platform: PlatformCart, results: List[Dict[str, Any]]) 
             (platform.platform == "blinkit" or platform.platform == "zepto")
             and actual_item_total is not None
             and (summary_item_count == 0 or summary_item_count == added_item_count)
+            # Sanity check: Bill total shouldn't be radically different from our expected sum
+            # unless it's a very small order where rounding/taxes might fluctuate.
+            and (abs(float(actual_item_total) - new_item_total) < (new_item_total * 0.25 + 100))
         ):
             actual_item_total = round(float(actual_item_total), 2)
             available_items = [item for item in platform.items if item.available]

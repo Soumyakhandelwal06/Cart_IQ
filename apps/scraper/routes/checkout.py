@@ -66,8 +66,11 @@ def parse_bill(text: str) -> dict:
         return None
         
     for i, line in enumerate(lines):
-        if any(x in line for x in ['item total', 'items total', 'mrp total', 'basket value', 'subtotal']):
-            if 'item_total' not in totals: totals['item_total'] = get_price(i)
+        # Prioritize Item Total / Subtotal over MRP Total
+        if any(x in line for x in ['item total', 'items total', 'basket value', 'subtotal']):
+            totals['item_total'] = get_price(i)
+        elif 'mrp total' in line and 'item_total' not in totals:
+            totals['item_total'] = get_price(i)
         elif any(x in line for x in ['delivery charge', 'delivery fee', 'shipping', 'delivery']):
             if 'delivery_fee' not in totals: totals['delivery_fee'] = get_price(i, is_fee=True)
         elif any(x in line for x in ['handling charge', 'handling fee', 'platform fee', 'conveyance']):
