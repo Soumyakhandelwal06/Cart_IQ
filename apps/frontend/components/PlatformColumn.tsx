@@ -141,9 +141,6 @@ export default function PlatformColumn({
         {platform.handling_fee > 0 && (
           <FeeRow label="Handling Fee" value={platform.handling_fee} />
         )}
-        {platform.surge_fee > 0 && (
-          <FeeRow label="Surge/Other" value={platform.surge_fee} warn={true} />
-        )}
         <div className="border-t border-slate-200 pt-3 mt-2 flex items-center justify-between">
           <span className="font-extrabold tracking-wider text-slate-400 text-xs">TOTAL</span>
           <span className={`font-black text-2xl ${isWinner ? "text-emerald-600" : "text-slate-800"}`}>

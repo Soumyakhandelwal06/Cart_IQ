@@ -59,12 +59,41 @@ def parse_pieces_from_name(name: str) -> int:
     
     return 0
 
+def _base_quantity_for_weighted_item(item) -> int:
+    """
+    Parser outputs can represent "2kg potato" either as quantity=1, weight=2kg
+    or, occasionally, quantity=2, weight=2kg. Treat the latter as one total
+    weight request so we do not multiply the cart quantity twice.
+    """
+    try:
+        req_qty = max(int(getattr(item, "quantity", 1) or 1), 1)
+    except (TypeError, ValueError):
+        req_qty = 1
+
+    weight = getattr(item, "weight", None)
+    if not weight:
+        return req_qty
+
+    match = re.search(r'([\d.]+)\s*(kg|g|l|ml)\b', str(weight).lower())
+    if not match:
+        return req_qty
+
+    try:
+        weight_number = float(match.group(1))
+    except ValueError:
+        return req_qty
+
+    if math.isclose(weight_number, float(req_qty), rel_tol=0.0, abs_tol=0.001):
+        return 1
+
+    return req_qty
+
 def get_final_quantity(item, matched_name: str) -> int:
     """
     Returns how many units to add to cart to satisfy the user's requirement.
     If the user asked for 2kg and the product is 500g, we add 4 units.
     """
-    req_qty = item.quantity
+    req_qty = _base_quantity_for_weighted_item(item)
     
     # If the user specified a weight, adjust quantity based on packet size
     if item.weight:
@@ -72,7 +101,13 @@ def get_final_quantity(item, matched_name: str) -> int:
         if req_g > 0:
             matched_g = parse_weight_to_grams(matched_name)
             if matched_g > 0:
-                multiplier = math.ceil(req_g / matched_g)
+                ratio = req_g / matched_g
+                # If the available pack is within 15% of the requested weight, 
+                # don't add an extra unit (e.g. 900g is close enough to 1kg)
+                if ratio > 1.0 and ratio <= 1.15:
+                    multiplier = 1
+                else:
+                    multiplier = math.ceil(ratio)
                 return req_qty * int(multiplier)
     
     # For piece-based items (eggs etc.) with no weight specified, adjust for pack size
