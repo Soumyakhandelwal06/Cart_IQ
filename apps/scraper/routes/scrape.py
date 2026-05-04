@@ -9,10 +9,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 
-from scrapers.blinkit import scrape_blinkit
-from scrapers.zepto import scrape_zepto
-from scrapers.bigbasket import scrape_bigbasket
-
 router = APIRouter()
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -38,6 +34,8 @@ class PlatformItemResult(BaseModel):
     unit_price: float
     quantity: int
     subtotal: float
+    requested_quantity: int = 1
+    requested_weight: Optional[str] = None
     image_url: Optional[str] = None
     product_url: Optional[str] = None
 
@@ -69,6 +67,144 @@ CART_URLS = {
     "bigbasket": "https://www.bigbasket.com/basket/?nc=nb",
 }
 
+SUCCESSFUL_CART_STATUSES = {"success", "partial"}
+
+
+def _as_positive_int(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _checkout_rows_by_url(results: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    rows: Dict[str, List[Dict[str, Any]]] = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        url = result.get("url")
+        if not url:
+            continue
+        rows.setdefault(url, []).append(result)
+    return rows
+
+
+def _cart_summary(results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return next(
+        (
+            result.get("totals")
+            for result in results
+            if isinstance(result, dict)
+            and result.get("type") == "cart_summary"
+            and isinstance(result.get("totals"), dict)
+        ),
+        None
+    )
+
+
+def _apply_cart_analysis(platform: PlatformCart, results: List[Dict[str, Any]]) -> None:
+    """
+    Rebuild the platform comparison rows from the cart-add result, not from the
+    pre-cart scrape estimate. This keeps displayed quantities and totals aligned
+    with what actually landed in the user's cart.
+    """
+    rows_by_url = _checkout_rows_by_url(results)
+    final_items: List[PlatformItemResult] = []
+    new_item_total = 0.0
+    any_added = False
+    all_requested_rows_fulfilled = True
+
+    for item in platform.items:
+        required_qty = _as_positive_int(item.quantity)
+        row = rows_by_url.get(item.product_url or "", [])
+        checkout_row = row.pop(0) if row else None
+        status = checkout_row.get("status") if checkout_row else None
+        added_qty = _as_positive_int(checkout_row.get("added_qty")) if checkout_row else 0
+
+        if status in SUCCESSFUL_CART_STATUSES and added_qty > 0:
+            if checkout_row.get("unit_price") is not None:
+                item.unit_price = round(float(checkout_row["unit_price"]), 2)
+            item.quantity = added_qty
+            if checkout_row.get("subtotal") is not None:
+                item.subtotal = round(float(checkout_row["subtotal"]), 2)
+            else:
+                item.subtotal = round(item.unit_price * added_qty, 2)
+            item.available = True
+            new_item_total += item.subtotal
+            any_added = True
+            if added_qty < required_qty or status != "success":
+                all_requested_rows_fulfilled = False
+        else:
+            item.available = False
+            item.quantity = 0
+            item.subtotal = 0.0
+            all_requested_rows_fulfilled = False
+
+        final_items.append(item)
+
+    platform.items = final_items
+    platform.item_total = round(new_item_total, 2)
+
+    summary_obj = _cart_summary(results)
+    if summary_obj:
+        print(f"[Scraper] Applying actual cart fees for {platform.platform}: {summary_obj}")
+        # Blinkit can show a different final selling price after cart sync than
+        # the pre-cart scrape. When the cart count matches the rows we just
+        # added, trust Blinkit's cart item total for the comparison display.
+        actual_item_total = summary_obj.get("item_total")
+        summary_item_count = _as_positive_int(summary_obj.get("item_count"))
+        added_item_count = sum(_as_positive_int(item.quantity) for item in platform.items if item.available)
+        if (
+            platform.platform == "blinkit"
+            and actual_item_total is not None
+            and (summary_item_count == 0 or summary_item_count == added_item_count)
+        ):
+            actual_item_total = round(float(actual_item_total), 2)
+            available_items = [item for item in platform.items if item.available]
+            if len(available_items) == 1 and available_items[0].quantity > 0:
+                available_items[0].subtotal = actual_item_total
+                available_items[0].unit_price = round(actual_item_total / available_items[0].quantity, 2)
+            platform.item_total = actual_item_total
+
+        # Apply fees separately; for non-Blinkit platforms the item total stays
+        # rebuilt from requested cart rows so stale cart entries cannot pollute
+        # the comparison table.
+        if summary_obj.get("delivery_fee") is not None:
+            platform.delivery_fee = summary_obj["delivery_fee"]
+        if summary_obj.get("handling_fee") is not None:
+            platform.handling_fee = summary_obj["handling_fee"]
+        if summary_obj.get("surge_fee") is not None:
+            platform.surge_fee = summary_obj["surge_fee"]
+    elif platform.platform == "bigbasket" and platform.item_total > 500:
+        platform.delivery_fee = 0.0
+
+    platform.total_payable = round(
+        platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee,
+        2
+    )
+    platform.all_items_available = bool(final_items) and all_requested_rows_fulfilled
+
+    if platform.all_items_available:
+        platform.cart_status = "added"
+    elif any_added:
+        platform.cart_status = "partial"
+    else:
+        platform.cart_status = "failed"
+
+
+def _clear_platform_cart_result(platform: PlatformCart) -> None:
+    for item in platform.items:
+        item.available = False
+        item.quantity = 0
+        item.subtotal = 0.0
+    platform.item_total = 0.0
+    platform.delivery_fee = 0.0
+    platform.handling_fee = 0.0
+    platform.surge_fee = 0.0
+    platform.total_payable = 0.0
+    platform.all_items_available = False
+    platform.cart_status = "failed"
+
 # ── Route ──────────────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=ScrapeResponse)
@@ -85,6 +221,10 @@ async def scrape_all(request: ScrapeRequest, req: Request):
 
     # ── Step 1: Scrape all 3 platforms concurrently ───────────────────────────
     try:
+        from scrapers.blinkit import scrape_blinkit
+        from scrapers.zepto import scrape_zepto
+        from scrapers.bigbasket import scrape_bigbasket
+
         scrape_results = await asyncio.wait_for(
             asyncio.gather(
                 scrape_blinkit(request.items, request.lat, request.lon,
@@ -148,13 +288,14 @@ async def scrape_all(request: ScrapeRequest, req: Request):
                 CheckoutItem(
                     product_url=item.product_url,
                     quantity=item.quantity,
-                    name=item.matched_product_name
+                    name=item.matched_product_name,
+                    unit_price=item.unit_price
                 )
                 for item in available_items
             ]
 
             if platform.platform == "zepto":
-                results = await add_items_to_zepto_cart(p, storage_state, checkout_items)
+                results = await add_items_to_zepto_cart(p, storage_state, checkout_items, request.lat, request.lon)
             elif platform.platform == "blinkit":
                 results = await add_items_to_blinkit_cart(p, storage_state, checkout_items)
             elif platform.platform == "bigbasket":
@@ -163,76 +304,26 @@ async def scrape_all(request: ScrapeRequest, req: Request):
                 platform.cart_status = "failed"
                 continue
 
-            # Reconcile items: update comparison table to match exactly what was added to the cart
-            successful_urls = {r.get("url"): r.get("added_qty", 0) for r in results if r.get("status") in ["success", "partial"]}
-            
-            final_items = []
-            new_item_total = 0.0
-            for item in platform.items:
-                # If we successfully added some quantity of this product URL
-                if item.product_url in successful_urls:
-                    added_qty = successful_urls[item.product_url]
-                    if added_qty > 0:
-                        item.quantity = added_qty
-                        item.subtotal = round(item.unit_price * added_qty, 2)
-                        new_item_total += item.subtotal
-                        final_items.append(item)
-                else:
-                    # Item failed to add
-                    item.available = False
-                    item.quantity = 0
-                    item.subtotal = 0.0
-                    final_items.append(item)
-
-            platform.items = final_items
-            platform.item_total = round(new_item_total, 2)
-            
-            # Extract cart summary if available (live fees)
-            summary_obj = next((r["totals"] for r in results if r.get("type") == "cart_summary"), None)
-            
-            if summary_obj:
-                print(f"[Scraper] Applying actual cart fees for {platform.platform}: {summary_obj}")
-                # ONLY apply fees, don't overwrite item_total because the actual cart might have old items in it!
-                # If we overwrite item_total, the math in the UI will look completely broken.
-                if summary_obj.get("delivery_fee") is not None: platform.delivery_fee = summary_obj["delivery_fee"]
-                if summary_obj.get("handling_fee") is not None: platform.handling_fee = summary_obj["handling_fee"]
-                if summary_obj.get("surge_fee") is not None: platform.surge_fee = summary_obj["surge_fee"]
-            else:
-                if platform.platform == "bigbasket" and platform.item_total > 500:
-                    platform.delivery_fee = 0.0
-
-            # ALWAYS recalculate total_payable so the UI math adds up perfectly.
-            platform.total_payable = round(platform.item_total + platform.delivery_fee + platform.handling_fee + platform.surge_fee, 2)
-            platform.all_items_available = all(i.available for i in final_items)
-
-            # Determine cart_status from results
-            statuses = [r.get("status", "error") for r in results if r.get("type") != "cart_summary"]
-            
-            if all(s == "success" for s in statuses) and len(statuses) > 0:
-                if platform.all_items_available:
-                    platform.cart_status = "added"
-                else:
-                    platform.cart_status = "partial" # some items were not found
-            elif any(s in ("success", "partial") for s in statuses):
-                platform.cart_status = "partial"
-            else:
-                platform.cart_status = "failed"
+            _apply_cart_analysis(platform, results)
 
             print(f"[Scraper] {platform.platform} cart → {platform.cart_status} (Total: ₹{platform.total_payable})")
 
         except Exception as e:
             print(f"[Scraper] Auto-checkout failed for {platform.platform}: {e}")
-            platform.cart_status = "failed"
+            _clear_platform_cart_result(platform)
 
     # ── Step 3: Find the winner ───────────────────────────────────────────────
-    platforms_with_items = [p for p in platforms if sum(1 for i in p.items if i.available) > 0]
+    platforms_with_items = [
+        p for p in platforms
+        if p.cart_status != "failed" and sum(1 for i in p.items if i.available) > 0
+    ]
 
     if not platforms_with_items:
         winner = platforms[0]
     else:
         def winner_score(p):
             available_count = sum(1 for i in p.items if i.available)
-            return (available_count, -p.total_payable)
+            return (1 if p.all_items_available else 0, available_count, -p.total_payable)
         winner = max(platforms_with_items, key=winner_score)
 
     return ScrapeResponse(
