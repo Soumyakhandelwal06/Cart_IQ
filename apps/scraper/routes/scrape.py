@@ -172,8 +172,11 @@ def _apply_cart_analysis(platform: PlatformCart, results: List[Dict[str, Any]]) 
         # Apply fees separately; for non-Blinkit platforms the item total stays
         # rebuilt from requested cart rows so stale cart entries cannot pollute
         # the comparison table.
-        if summary_obj.get("delivery_fee") is not None:
+        if platform.platform == "zepto":
+            platform.delivery_fee = 30.0
+        elif summary_obj.get("delivery_fee") is not None:
             platform.delivery_fee = summary_obj["delivery_fee"]
+        
         if summary_obj.get("handling_fee") is not None:
             platform.handling_fee = summary_obj["handling_fee"]
         if summary_obj.get("surge_fee") is not None:
@@ -217,9 +220,21 @@ async def scrape_all(request: ScrapeRequest, req: Request):
     2. Auto-adds items to cart for each connected platform
     3. Returns comparison results with cart_url and cart_status
     """
-    if not request.items:
-        raise HTTPException(status_code=400, detail="No items provided")
-
+    # ── Step 0: Consolidate Items ─────────────────────────────────────────────
+    # This prevents searching for the same thing twice and adding different variants.
+    consolidated_items = {}
+    for item in request.items:
+        # Simple name-based consolidation
+        key = item.name.lower().strip()
+        if key not in consolidated_items:
+            consolidated_items[key] = item
+        else:
+            # Merge quantities if duplicate item found
+            existing = consolidated_items[key]
+            existing.quantity = (existing.quantity or 1) + (item.quantity or 1)
+            print(f"[Scraper] Consolidated duplicate item: {key} -> new qty {existing.quantity}")
+    
+    final_request_items = list(consolidated_items.values())
     storage_states = request.storage_states or {}
 
     # ── Step 1: Scrape all 3 platforms concurrently ───────────────────────────
@@ -230,11 +245,11 @@ async def scrape_all(request: ScrapeRequest, req: Request):
 
         scrape_results = await asyncio.wait_for(
             asyncio.gather(
-                scrape_blinkit(request.items, request.lat, request.lon,
+                scrape_blinkit(final_request_items, request.lat, request.lon,
                                storage_state=storage_states.get("blinkit")),
-                scrape_zepto(request.items, request.lat, request.lon,
+                scrape_zepto(final_request_items, request.lat, request.lon,
                              storage_state=storage_states.get("zepto")),
-                scrape_bigbasket(request.items, request.lat, request.lon,
+                scrape_bigbasket(final_request_items, request.lat, request.lon,
                                  storage_state=storage_states.get("bigbasket")),
                 return_exceptions=True
             ),
