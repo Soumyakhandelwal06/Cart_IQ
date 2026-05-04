@@ -155,7 +155,7 @@ def _apply_cart_analysis(platform: PlatformCart, results: List[Dict[str, Any]]) 
         summary_item_count = _as_positive_int(summary_obj.get("item_count"))
         added_item_count = sum(_as_positive_int(item.quantity) for item in platform.items if item.available)
         if (
-            platform.platform == "blinkit"
+            (platform.platform == "blinkit" or platform.platform == "zepto")
             and actual_item_total is not None
             and (summary_item_count == 0 or summary_item_count == added_item_count)
         ):

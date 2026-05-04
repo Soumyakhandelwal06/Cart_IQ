@@ -164,15 +164,21 @@ ZEPTO_STEPPER_STATE_JS = r"""
         ? name.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 3).slice(0, 2)
         : [];
 
-    const directText = (el) => Array.from(el.childNodes || [])
-        .filter(n => n.nodeType === 3)
-        .map(n => (n.textContent || '').trim())
-        .join('')
-        .trim();
+    const directText = (el) => {
+        const nodes = Array.from(el.childNodes || []);
+        const direct = nodes.filter(n => n.nodeType === 3)
+            .map(n => (n.textContent || '').trim())
+            .join('')
+            .trim();
+        if (direct) return direct;
+        // Fallback: if it's a small element with exactly one child that is a text node
+        if (nodes.length === 1 && nodes[0].nodeType === 3) return nodes[0].textContent.trim();
+        return '';
+    };
     const visible = (el) => {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 &&
-            r.x < vw && r.right > 0 && r.y < vh && r.bottom > headerHeight;
+            r.x < window.innerWidth && r.right > 0 && r.y < window.innerHeight && r.bottom > 80;
     };
     const textOf = (el) => ((el.innerText || el.textContent || '').trim());
     const isPlus = (el) => {
@@ -184,7 +190,8 @@ ZEPTO_STEPPER_STATE_JS = r"""
         return t === '+' || dt === '+' ||
             aria.includes('increase') || aria.includes('increment') || aria.includes('add more') ||
             title.includes('increase') || title.includes('plus') ||
-            cls.includes('increase') || cls.includes('plus');
+            cls.includes('increase') || cls.includes('plus') ||
+            cls.includes('step-up');
     };
     const isMinus = (el) => {
         const t = textOf(el);
@@ -195,11 +202,15 @@ ZEPTO_STEPPER_STATE_JS = r"""
         return t === '-' || t === '−' || dt === '-' || dt === '−' ||
             aria.includes('decrease') || aria.includes('remove') ||
             title.includes('decrease') || title.includes('minus') ||
-            cls.includes('decrease') || cls.includes('minus');
+            cls.includes('decrease') || cls.includes('minus') ||
+            cls.includes('step-down');
     };
     const quantityFrom = (el) => {
         const t = directText(el);
-        if (/^[1-9]\d*$/.test(t)) return parseInt(t, 10);
+        if (/^\d+$/.test(t)) return parseInt(t, 10);
+        const it = textOf(el);
+        // If the element's total text is just a number and it's short, it's likely the qty
+        if (/^\d+$/.test(it) && it.length <= 3) return parseInt(it, 10);
         return null;
     };
 
@@ -288,11 +299,16 @@ ZEPTO_CART_ROW_STATE_JS = r"""
             .slice(0, 3)
         : [];
 
-    const directText = (el) => Array.from(el.childNodes || [])
-        .filter(n => n.nodeType === 3)
-        .map(n => (n.textContent || '').trim())
-        .join('')
-        .trim();
+    const directText = (el) => {
+        const nodes = Array.from(el.childNodes || []);
+        const direct = nodes.filter(n => n.nodeType === 3)
+            .map(n => (n.textContent || '').trim())
+            .join('')
+            .trim();
+        if (direct) return direct;
+        if (nodes.length === 1 && nodes[0].nodeType === 3) return nodes[0].textContent.trim();
+        return '';
+    };
     const textOf = (el) => ((el.innerText || el.textContent || '').trim());
     const visible = (el) => {
         const r = el.getBoundingClientRect();
@@ -308,7 +324,8 @@ ZEPTO_CART_ROW_STATE_JS = r"""
         return t === '+' || dt === '+' ||
             aria.includes('increase') || aria.includes('increment') || aria.includes('add more') ||
             title.includes('increase') || title.includes('plus') ||
-            cls.includes('increase') || cls.includes('plus');
+            cls.includes('increase') || cls.includes('plus') ||
+            cls.includes('step-up');
     };
     const isMinus = (el) => {
         const t = textOf(el);
@@ -319,11 +336,14 @@ ZEPTO_CART_ROW_STATE_JS = r"""
         return t === '-' || t === '−' || dt === '-' || dt === '−' ||
             aria.includes('decrease') || aria.includes('remove') ||
             title.includes('decrease') || title.includes('minus') ||
-            cls.includes('decrease') || cls.includes('minus');
+            cls.includes('decrease') || cls.includes('minus') ||
+            cls.includes('step-down');
     };
     const quantityFrom = (el) => {
         const t = directText(el);
-        if (/^[1-9]\d*$/.test(t)) return parseInt(t, 10);
+        if (/^\d+$/.test(t)) return parseInt(t, 10);
+        const it = textOf(el);
+        if (/^\d+$/.test(it) && it.length <= 3) return parseInt(it, 10);
         return null;
     };
     const wordMatch = (text) => words.length > 0 && words.every(w => text.includes(w));
