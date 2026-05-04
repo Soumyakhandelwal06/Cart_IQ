@@ -1,5 +1,4 @@
 "use client";
-import { useState } from "react";
 import { PlatformCart } from "@/app/results/[searchId]/page";
 import { useTheme } from "@/hooks/useTheme";
 
@@ -107,7 +106,7 @@ export default function PlatformColumn({
                   if (isUsableUrl(item.product_url)) return item.product_url!;
                   const q = encodeURIComponent(item.matched_product_name);
                   if (platform.platform === "blinkit") return `https://blinkit.com/s/?q=${q}`;
-                  if (platform.platform === "zepto") return `https://www.zeptonow.com/search?query=${q}`;
+                  if (platform.platform === "zepto") return `https://www.zepto.com/search?query=${q}`;
                   return `https://www.bigbasket.com/ps/?q=${q}`;
                 })()}
                 target="_blank"
@@ -117,7 +116,8 @@ export default function PlatformColumn({
                 {item.matched_product_name}
               </a>
               <p className="text-[13px] text-slate-500 mt-1 font-medium">
-                {item.quantity} unit{item.quantity > 1 ? "s" : ""} · {item.available ? `₹${item.unit_price}` : ""}
+                {formatRequestedItem(item)}
+                {item.available ? ` · Added ${item.quantity} unit${item.quantity > 1 ? "s" : ""} · ₹${item.unit_price}` : ""}
               </p>
             </div>
 
@@ -138,8 +138,11 @@ export default function PlatformColumn({
       <div className="px-6 py-5 bg-slate-50 space-y-2 border-t border-slate-100">
         <FeeRow label="Items Total" value={platform.item_total} />
         <FeeRow label="Delivery" value={platform.delivery_fee} />
-        {(platform.handling_fee > 0 || platform.surge_fee > 0) && (
-          <FeeRow label="Other Fees" value={platform.handling_fee + platform.surge_fee} warn={platform.surge_fee > 0} />
+        {platform.handling_fee > 0 && (
+          <FeeRow label="Handling Fee" value={platform.handling_fee} />
+        )}
+        {platform.surge_fee > 0 && (
+          <FeeRow label="Surge/Other" value={platform.surge_fee} warn={true} />
         )}
         <div className="border-t border-slate-200 pt-3 mt-2 flex items-center justify-between">
           <span className="font-extrabold tracking-wider text-slate-400 text-xs">TOTAL</span>
@@ -169,6 +172,16 @@ export default function PlatformColumn({
       </div>
     </div>
   );
+}
+
+function formatRequestedItem(item: PlatformCart["items"][number]) {
+  const requestedQty = item.requested_quantity ?? item.quantity;
+  if (item.requested_weight) {
+    return requestedQty > 1
+      ? `Requested ${requestedQty} x ${item.requested_weight}`
+      : `Requested ${item.requested_weight}`;
+  }
+  return `Requested ${requestedQty} unit${requestedQty > 1 ? "s" : ""}`;
 }
 
 function FeeRow({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
