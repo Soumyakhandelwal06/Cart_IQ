@@ -1419,7 +1419,7 @@ async def add_items_to_blinkit_cart(p: Playwright, storage_state: dict, items: L
                         // Match to correct product card using name keywords
                         if (name) {
                             const words = name.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
-                                .filter(w => w.length > 3).slice(0, 2);
+                                .filter(w => w.length > 2).slice(0, 3);
                             
                             for (const addEl of addEls) {
                                 let parent = addEl.parentElement;
@@ -1712,6 +1712,28 @@ async def add_items_to_bigbasket_cart(p: Playwright, storage_state: dict, items:
     page = await context.new_page()
     await page.goto("https://www.bigbasket.com", wait_until="domcontentloaded")
     await asyncio.sleep(2)
+
+    # NEW: Clear cart before adding new items to prevent variant pollution from previous runs
+    try:
+        print("[Bigbasket Checkout] Clearing existing cart items for a clean comparison...")
+        await page.goto("https://www.bigbasket.com/basket/?nc=nb", wait_until="domcontentloaded", timeout=15000)
+        await asyncio.sleep(4)
+        await page.evaluate("""() => {
+            const deleteBtns = Array.from(document.querySelectorAll('button, span, div, a'))
+                .filter(el => {
+                    const t = (el.innerText || '').toLowerCase();
+                    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                    const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+                    return t === 'delete' || aria.includes('delete') || cls.includes('delete-icon') || cls.includes('remove');
+                });
+            for (const b of deleteBtns) {
+                try { b.click(); } catch(e) {}
+            }
+        }""")
+        await asyncio.sleep(2)
+        print("[Bigbasket Checkout] Cart cleared ✅")
+    except Exception as e:
+        print(f"[Bigbasket Checkout] Cart clear failed (ignoring): {e}")
     
     results = []
     for item in items:
